@@ -1,0 +1,19 @@
+# Virtual environment
+.venv/
+
+# Python cache
+__pycache__/
+*.pyc
+
+# Hugging Face / SpeechBrain caches
+.huggingface/
+wav2vec2_checkpoints/
+.cache/
+hf_cache/
+
+# Audio test files
+*.wav
+
+# OS
+.DS_Store
+Thumbs.db
