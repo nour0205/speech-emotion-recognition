@@ -1,0 +1,40 @@
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Virtual environments
+venv/
+.venv/
+env/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Git
+.git/
+.gitignore
+
+# Docker
+Dockerfile*
+docker-compose*.yml
+.docker/
+
+# Cache and temp
+*.log
+.cache/
+.pytest_cache/
+
+# Model checkpoints (will be downloaded at runtime)
+wav2vec2_checkpoints/
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Test files
+test.wav
+*.test.wav
