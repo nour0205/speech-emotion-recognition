@@ -1,12 +1,35 @@
-"""Streamlit frontend for Speech Emotion Recognition."""
+"""Streamlit frontend for Speech Emotion Recognition.
+
+This is the main entry point for the Streamlit UI. It uses the API client
+to communicate with the backend and displays results using the UI components.
+
+Run with:
+    streamlit run apps/streamlit_app/app.py
+    
+Or via Docker:
+    docker compose up frontend
+"""
 
 import os
+import sys
+
+# Add apps directory to path for imports when running as script
+_apps_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+if _apps_dir not in sys.path:
+    sys.path.insert(0, _apps_dir)
+
 import streamlit as st
 import httpx
 
-from api_client import get_client, EmotionAPIClient
+from streamlit_app.api_client import get_client, EmotionAPIClient
+from streamlit_app.ui.components import (
+    display_emotion_result,
+    display_api_status,
+    render_footer,
+    EMOTION_EMOJIS,
+)
 
-# Page config - must be first
+# Page config - must be first Streamlit command
 st.set_page_config(
     page_title="Speech Emotion Recognition",
     page_icon="🎤",
@@ -15,13 +38,6 @@ st.set_page_config(
 
 # Constants - use environment variable for Docker, fallback to localhost
 API_URL = os.environ.get("API_URL", "http://localhost:8000")
-
-EMOTION_EMOJIS = {
-    "Angry": "😠",
-    "Happy": "😊",
-    "Sad": "😢",
-    "Neutral": "😐",
-}
 
 
 def check_backend_health(client: EmotionAPIClient) -> bool:
@@ -35,29 +51,17 @@ def check_backend_health(client: EmotionAPIClient) -> bool:
         return False
 
 
-def display_results(result: dict):
-    """Display prediction results with nice formatting."""
+def display_results(result: dict) -> None:
+    """Display prediction results using UI components."""
     emotion = result.get("emotion", result.get("label", "Unknown"))
     confidence = result["confidence"]
-    inference_time = result["inference_time_sec"]
+    inference_time = result.get("inference_time_sec")
     
-    emoji = EMOTION_EMOJIS.get(emotion, "🎭")
-    
-    st.markdown("---")
-    st.markdown("### 🎯 Results")
-    
-    col1, col2 = st.columns([1, 2])
-    
-    with col1:
-        st.markdown(
-            f"<h1 style='text-align: center; font-size: 80px;'>{emoji}</h1>", 
-            unsafe_allow_html=True
-        )
-    
-    with col2:
-        st.markdown(f"**Detected Emotion:** {emotion}")
-        st.progress(confidence, text=f"Confidence: {confidence:.1%}")
-        st.caption(f"⏱️ Inference time: {inference_time:.3f}s")
+    display_emotion_result(
+        emotion=emotion,
+        confidence=confidence,
+        inference_time=inference_time,
+    )
 
 
 def main():
@@ -174,12 +178,8 @@ def main():
                 st.session_state.last_audio_hash == audio_hash):
                 display_results(st.session_state.last_result)
     
-    # Footer
-    st.markdown("---")
-    st.caption("""
-    **Model:** [speechbrain/emotion-recognition-wav2vec2-IEMOCAP](https://huggingface.co/speechbrain/emotion-recognition-wav2vec2-IEMOCAP)  
-    **Emotions detected:** Angry, Happy, Sad, Neutral
-    """)
+    # Footer with model information
+    render_footer()
 
 
 if __name__ == "__main__":

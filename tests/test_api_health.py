@@ -5,6 +5,7 @@ from fastapi.testclient import TestClient
 
 from src.api.main import create_app
 from src.api.config import Settings
+from src.api.deps import init_model_manager
 
 
 @pytest.fixture
@@ -21,8 +22,11 @@ def test_settings() -> Settings:
 @pytest.fixture
 def client(test_settings: Settings) -> TestClient:
     """Create a test client with the app."""
+    # Initialize model manager before creating app
+    # (lifespan won't run automatically in sync TestClient without context manager)
+    init_model_manager(test_settings)
     app = create_app(test_settings)
-    return TestClient(app)
+    return TestClient(app, raise_server_exceptions=False)
 
 
 class TestHealthEndpoint:

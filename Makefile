@@ -1,13 +1,14 @@
-.PHONY: install install-dev backend frontend run docker docker-build docker-down docker-dev docker-test clean help fixtures predict
+.PHONY: install install-dev api backend frontend run docker docker-build docker-down docker-dev docker-test clean help fixtures predict
 
 # Default target
 help:
 	@echo "Speech Emotion Recognition - Available commands:"
 	@echo ""
 	@echo "  Local development:"
-	@echo "    make run          Start both backend and frontend locally"
-	@echo "    make backend      Start the FastAPI backend only (port 8000)"
-	@echo "    make frontend     Start the Streamlit frontend only (port 8501)"
+	@echo "    make run          Start both API and frontend locally"
+	@echo "    make api          Start the FastAPI server (port 8000)"
+	@echo "    make backend      Alias for 'make api'"
+	@echo "    make frontend     Start the Streamlit frontend (port 8501)"
 	@echo "    make install      Install production dependencies"
 	@echo "    make install-dev  Install development dependencies"
 	@echo "    make test         Run tests locally"
@@ -27,10 +28,9 @@ help:
 	@echo "    make clean        Remove cache and temporary files"
 	@echo ""
 
-# Run both services together (local)
+# Run both services together (Docker - recommended)
 run:
-	@chmod +x run.sh
-	@./run.sh
+	docker compose up --build api frontend
 
 # Docker commands
 docker:
@@ -51,16 +51,19 @@ install:
 install-dev:
 	pip install -r requirements/dev.txt
 
-# Start backend API server
-backend:
-	@echo "Starting FastAPI backend on http://localhost:8000"
+# Start API server (production-ready REST API)
+api:
+	@echo "Starting FastAPI API on http://localhost:8000"
 	@echo "API docs available at http://localhost:8000/docs"
-	uvicorn backend.main:app --reload --host 0.0.0.0 --port 8000
+	PYTHONPATH=src uvicorn src.api.main:app --reload --host 0.0.0.0 --port 8000
+
+# Alias for backwards compatibility
+backend: api
 
 # Start frontend Streamlit app
 frontend:
 	@echo "Starting Streamlit frontend on http://localhost:8501"
-	cd frontend && streamlit run app.py --server.port 8501
+	PYTHONPATH=src streamlit run apps/streamlit_app/app.py --server.port 8501
 
 # Clean up cache files
 clean:
@@ -76,12 +79,12 @@ test:
 
 # Format code
 format:
-	black backend/ frontend/
-	ruff check --fix backend/ frontend/
+	black src/ apps/ scripts/ tests/
+	ruff check --fix src/ apps/ scripts/ tests/
 
 # Lint code
 lint:
-	ruff check backend/ frontend/
+	ruff check src/ apps/ scripts/ tests/
 
 # Docker dev container
 docker-dev:
@@ -97,7 +100,7 @@ docker-test-integration:
 
 # Generate test fixtures
 fixtures:
-	python scripts/generate_fixtures.py
+	PYTHONPATH=src python scripts/generate_fixtures.py
 
 # Generate fixtures in Docker
 docker-fixtures:
@@ -106,7 +109,7 @@ docker-fixtures:
 # Predict emotion from a file (local)
 predict:
 	@if [ -z "$(FILE)" ]; then echo "Usage: make predict FILE=path/to/audio.wav"; exit 1; fi
-	python scripts/predict_file.py --input "$(FILE)" --pretty
+	PYTHONPATH=src python scripts/predict_file.py --input "$(FILE)" --pretty
 
 # Predict emotion from a file (Docker)
 docker-predict:

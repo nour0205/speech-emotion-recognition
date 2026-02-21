@@ -17,17 +17,14 @@ COPY requirements/ requirements/
 RUN pip install --no-cache-dir -r requirements/dev.txt
 
 # Copy all source code
-COPY audioio/ audioio/
-COPY timeline/ timeline/
-COPY model/ model/
-COPY backend/ backend/
-COPY frontend/ frontend/
 COPY src/ src/
+COPY apps/ apps/
 COPY scripts/ scripts/
 COPY tests/ tests/
+COPY configs/ configs/
 
-# Set PYTHONPATH to include app directory
-ENV PYTHONPATH=/app
+# Set PYTHONPATH to include src directory for imports
+ENV PYTHONPATH=/app:/app/src
 
 # Default command (can be overridden)
 CMD ["python", "-c", "print('Development container ready. Use docker compose run to execute commands.')"]

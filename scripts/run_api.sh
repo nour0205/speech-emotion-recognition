@@ -41,6 +41,9 @@ if [[ -n "$RELOAD" ]]; then
     echo "  Reload: enabled"
 fi
 
+# Set PYTHONPATH to include src directory
+export PYTHONPATH="${PYTHONPATH:+$PYTHONPATH:}src"
+
 exec uvicorn src.api.main:app \
     --host "$HOST" \
     --port "$PORT" \

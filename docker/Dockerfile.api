@@ -49,12 +49,9 @@ ENV PATH="/opt/venv/bin:$PATH"
 # Set Python environment variables
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
-    PYTHONPATH=/app
+    PYTHONPATH=/app:/app/src
 
-# Copy application code
-COPY audioio/ /app/audioio/
-COPY timeline/ /app/timeline/
-COPY model/ /app/model/
+# Copy application code (core modules now in src/)
 COPY src/ /app/src/
 
 # Create non-root user for security

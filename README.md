@@ -15,88 +15,72 @@ Detect emotions from speech audio using a Wav2Vec2 model trained on IEMOCAP.
 
 ```
 speech-emotion-recognition/
-├── audioio/                # Audio I/O module (Phase 1)
-│   ├── loader.py          # WAV loading
-│   ├── validate.py        # Audio validation
-│   ├── preprocess.py      # Preprocessing pipeline
-│   └── errors.py          # Custom exceptions
-├── timeline/              # Timeline windowing & generation (Phase 2 & 4)
-│   ├── windowing.py       # Audio segmentation (Phase 2)
-│   ├── generate.py        # Timeline orchestration (Phase 4)
-│   ├── smooth.py          # Smoothing strategies (Phase 4)
-│   ├── merge.py           # Segment merging (Phase 4)
-│   ├── schema.py          # Output data structures (Phase 4)
-│   └── errors.py          # Custom exceptions
-├── model/                 # Emotion inference (Phase 3)
-│   ├── infer.py          # Main inference functions
-│   ├── labels.py         # Canonical labels & mapping
-│   ├── registry.py       # Model loading & caching
-│   ├── types.py          # Type definitions
-│   └── errors.py         # Custom exceptions
-├── src/api/              # REST API (Phase 5)
-│   ├── main.py           # FastAPI application
-│   ├── config.py         # Settings management
-│   ├── schemas.py        # API request/response models
-│   ├── errors.py         # Error handling & mapping
-│   ├── logging.py        # Structured logging
-│   └── deps.py           # Dependency injection
-├── backend/              # Legacy FastAPI backend
-│   ├── Dockerfile
-│   ├── main.py           # API entry point
-│   ├── core/
-│   │   └── model.py      # Emotion classifier
-│   └── schemas/
-│       └── emotion.py    # Pydantic models
-├── frontend/             # Streamlit UI
-│   ├── Dockerfile
-│   ├── app.py           # Web interface
-│   └── api_client.py    # Backend HTTP client
-├── docker/              # Docker configuration
-│   └── Dockerfile.api   # Production API container
-├── scripts/             # CLI tools
-│   ├── predict_file.py  # Single file prediction
-│   ├── predict_timeline.py  # Timeline generation
-│   ├── eval_dataset.py  # Dataset evaluation
-│   ├── run_api.sh       # API server runner
-│   └── generate_fixtures.py  # Generate test audio
-├── tests/               # Test suite
-│   ├── test_label_mapping.py
-│   ├── test_model_infer_smoke.py
-│   ├── test_timeline_smoothing.py   # Phase 4 tests
-│   ├── test_timeline_merge.py       # Phase 4 tests
-│   ├── test_timeline_generate.py    # Phase 4 tests
-│   ├── test_api_health.py           # Phase 5 tests
-│   ├── test_api_predict.py          # Phase 5 tests
-│   ├── test_api_timeline.py         # Phase 5 tests
-│   └── fixtures/
-├── requirements/
-│   ├── base.txt         # Core ML dependencies
-│   ├── backend.txt      # FastAPI dependencies
-│   ├── frontend.txt     # Streamlit dependencies
-│   └── dev.txt          # Development tools
-├── docker-compose.yml   # Container orchestration
-├── Dockerfile.dev       # Development container
-└── Makefile             # Convenience commands
+├── src/                       # Core library modules
+│   ├── audioio/               # Audio I/O, validation, preprocessing
+│   ├── model/                 # Emotion inference & model registry
+│   ├── timeline/              # Windowing, smoothing, timeline generation
+│   └── api/                   # FastAPI REST API
+├── apps/                      # Application entry points
+│   └── streamlit_app/         # Streamlit frontend
+│       ├── app.py             # Main web interface
+│       ├── api_client.py      # Backend HTTP client
+│       └── ui/                # Reusable UI components
+├── scripts/                   # CLI tools
+│   ├── predict_file.py        # Single file prediction
+│   ├── predict_timeline.py    # Timeline generation
+│   ├── eval_dataset.py        # Dataset evaluation
+│   └── run_api.sh             # API server runner
+├── tests/                     # Test suite
+├── configs/                   # Configuration files
+├── docker/                    # Docker configuration
+│   └── Dockerfile.api         # Production API container
+├── requirements/              # Python dependencies
+│   ├── base.txt               # Core ML dependencies
+│   ├── backend.txt            # FastAPI dependencies
+│   ├── frontend.txt           # Streamlit dependencies
+│   └── dev.txt                # Development tools
+├── docker-compose.yml         # Container orchestration
+├── Dockerfile.dev             # Development container
+├── Makefile                   # Convenience commands
+└── MIGRATION_NOTES.md         # Restructuring documentation
 ```
 
 ## 🚀 Quick Start
 
-### Using Docker
+### Using Docker (Recommended)
 
 ```bash
-# Build and start the API service
-docker compose build api
-docker compose up api
-
-# Or start all services (API + frontend)
+# Build and start all services (API + frontend)
 docker compose up --build
+
+# Or start services individually
+docker compose up api       # API only
+docker compose up frontend  # Frontend only (requires API)
 ```
 
 Services will be available at:
 
 - **API:** <http://localhost:8000>
 - **API Docs:** <http://localhost:8000/docs>
-- **Frontend:** <http://localhost:8501>
+- **Streamlit Frontend:** <http://localhost:8501>
+
+### Local Development
+
+```bash
+# Install dependencies
+make install-dev
+
+# Start the API server
+make api
+# or: PYTHONPATH=src uvicorn src.api.main:app --reload
+
+# Start the Streamlit frontend (in another terminal)
+make frontend
+# or: PYTHONPATH=src streamlit run apps/streamlit_app/app.py
+
+# Run tests
+make test
+```
 
 ### Quick Test
 

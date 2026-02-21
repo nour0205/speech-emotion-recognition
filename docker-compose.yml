@@ -7,21 +7,18 @@ services:
     container_name: ser-dev
     volumes:
       # Mount source code for live editing
-      - ./audioio:/app/audioio
-      - ./timeline:/app/timeline
-      - ./model:/app/model
-      - ./backend:/app/backend
-      - ./frontend:/app/frontend
       - ./src:/app/src
+      - ./apps:/app/apps
       - ./scripts:/app/scripts
       - ./tests:/app/tests
+      - ./configs:/app/configs
       # Cache HuggingFace models to avoid re-downloading
       - huggingface-cache:/root/.cache/huggingface
       # Cache pip packages
       - pip-cache:/root/.cache/pip
     environment:
       - PYTHONUNBUFFERED=1
-      - PYTHONPATH=/app
+      - PYTHONPATH=/app:/app/src
     working_dir: /app
     stdin_open: true
     tty: true
@@ -63,38 +60,26 @@ services:
       start_period: 60s # Model loads faster when cached
     restart: unless-stopped
 
-  # Legacy FastAPI Backend (from earlier phases)
-  backend:
-    build:
-      context: .
-      dockerfile: backend/Dockerfile
-    container_name: ser-backend
-    ports:
-      - "8001:8000"
-    volumes:
-      # Cache HuggingFace models to avoid re-downloading
-      - huggingface-cache:/root/.cache/huggingface
-    environment:
-      - PYTHONUNBUFFERED=1
-    healthcheck:
-      test:
-        [
-          "CMD",
-          "python",
-          "-c",
-          "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')",
-        ]
-      interval: 10s
-      timeout: 10s
-      retries: 20
-      start_period: 60s # Model loads faster when cached
-    restart: unless-stopped
+  # Legacy FastAPI Backend (moved to legacy/, kept for reference)
+  # Uncomment if you need to run the legacy backend
+  # backend:
+  #   build:
+  #     context: .
+  #     dockerfile: legacy/backend/Dockerfile
+  #   container_name: ser-backend
+  #   ports:
+  #     - "8001:8000"
+  #   volumes:
+  #     - huggingface-cache:/root/.cache/huggingface
+  #   environment:
+  #     - PYTHONUNBUFFERED=1
+  #   restart: unless-stopped
 
   # Streamlit Frontend
   frontend:
     build:
       context: .
-      dockerfile: frontend/Dockerfile
+      dockerfile: apps/streamlit_app/Dockerfile
     container_name: ser-frontend
     ports:
       - "8501:8501"
