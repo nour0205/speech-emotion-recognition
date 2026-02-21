@@ -75,7 +75,7 @@ services:
   #     - PYTHONUNBUFFERED=1
   #   restart: unless-stopped
 
-  # Streamlit Frontend
+  # Streamlit Frontend (with local inference capabilities)
   frontend:
     build:
       context: .
@@ -83,11 +83,12 @@ services:
     container_name: ser-frontend
     ports:
       - "8501:8501"
+    volumes:
+      # Cache HuggingFace models to avoid re-downloading
+      - huggingface-cache:/root/.cache/huggingface
     environment:
-      - API_URL=http://api:8000
-    depends_on:
-      api:
-        condition: service_healthy
+      - PYTHONUNBUFFERED=1
+      - PYTHONPATH=/app:/app/src
     restart: unless-stopped
 
 volumes:

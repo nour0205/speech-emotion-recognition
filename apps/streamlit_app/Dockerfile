@@ -3,14 +3,25 @@ FROM python:3.11-slim
 
 WORKDIR /app
 
-# Copy requirements
-COPY requirements/frontend.txt requirements.txt
+# Install system dependencies for audio processing
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    libsndfile1 \
+    && rm -rf /var/lib/apt/lists/*
+
+# Copy requirements (frontend.txt now includes base.txt)
+COPY requirements/ requirements/
 
 # Install Python dependencies
-RUN pip install --no-cache-dir -r requirements.txt
+RUN pip install --no-cache-dir -r requirements/frontend.txt
+
+# Copy source modules for local inference
+COPY src/ ./src/
 
 # Copy Streamlit app
 COPY apps/streamlit_app/ ./apps/streamlit_app/
+
+# Set PYTHONPATH to include src
+ENV PYTHONPATH=/app
 
 # Expose Streamlit port
 EXPOSE 8501
