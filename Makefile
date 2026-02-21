@@ -1,4 +1,4 @@
-.PHONY: install install-dev api backend frontend run docker docker-build docker-down docker-dev docker-test clean help fixtures predict
+.PHONY: install install-dev api backend frontend run docker docker-build docker-down docker-dev docker-test clean help fixtures predict pdf clean-docs docker-pdf
 
 # Default target
 help:
@@ -23,6 +23,11 @@ help:
 	@echo ""
 	@echo "  Scripts:"
 	@echo "    make predict FILE=path/to/audio.wav    Predict emotion from file"
+	@echo ""
+	@echo "  Documentation:"
+	@echo "    make pdf          Build docs/REPORT.pdf from Markdown"
+	@echo "    make docker-pdf   Build PDF using Docker (no local deps)"
+	@echo "    make clean-docs   Remove generated PDF and diagram cache"
 	@echo ""
 	@echo "  Utilities:"
 	@echo "    make clean        Remove cache and temporary files"
@@ -115,3 +120,23 @@ predict:
 docker-predict:
 	@if [ -z "$(FILE)" ]; then echo "Usage: make docker-predict FILE=path/to/audio.wav"; exit 1; fi
 	docker compose run --rm dev python scripts/predict_file.py --input "$(FILE)" --pretty
+
+# ============================================================================
+# Documentation targets
+# ============================================================================
+
+# Build PDF documentation from Markdown with Mermaid diagrams
+pdf:
+	@chmod +x docs/scripts/build_docs.sh
+	@docs/scripts/build_docs.sh
+
+# Build PDF using Docker (avoids local dependency requirements)
+docker-pdf:
+	docker compose -f docker-compose.docs.yml run --rm docs-builder
+
+# Clean generated documentation artifacts
+clean-docs:
+	rm -f docs/REPORT.pdf
+	rm -rf docs/diagrams/
+	rm -rf docs/_cache/
+	@echo "Documentation artifacts cleaned"

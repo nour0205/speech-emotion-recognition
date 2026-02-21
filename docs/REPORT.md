@@ -27,25 +27,25 @@ Design goals:
 ```mermaid
 flowchart TB
   subgraph L1[Presentation Layer]
-    ST[Streamlit UI\napps/streamlit_app\nUpload Record Visualize RunReport]
-    API[FastAPI Service\nsrc/api\nREST validation error mapping]
+    ST[Streamlit UI<br/>apps/streamlit_app<br/>Upload Record Visualize RunReport]
+    API[FastAPI Service<br/>src/api<br/>REST validation error mapping]
   end
 
   subgraph L2[Application Layer]
-    ORCH[Orchestrator\nrun_analysis and timeline.generate\ncollect timings logs config]
+    ORCH[Orchestrator<br/>run_analysis and timeline.generate<br/>collect timings logs config]
   end
 
   subgraph L3[Core Library]
-    AIO[audioio\nsrc/audioio\nDecode Validate Preprocess Stats]
-    WIN[Windowing\nsrc/timeline/windowing\nWindow hop padding timestamps]
-    SER[Model\nsrc/model\nRegistry cache inference mapping]
-    TLINE[Timeline\nsrc/timeline\nSmooth Merge Segments]
+    AIO[audioio<br/>src/audioio<br/>Decode Validate Preprocess Stats]
+    WIN[Windowing<br/>src/timeline/windowing<br/>Window hop padding timestamps]
+    SER[Model<br/>src/model<br/>Registry cache inference mapping]
+    TLINE[Timeline<br/>src/timeline<br/>Smooth Merge Segments]
   end
 
   subgraph L4[Infrastructure]
-    LOG[Logging\nrequest id structured logs UI buffer]
-    CFG[Config\nAudioConfig WindowingConfig SmoothingConfig MergeConfig]
-    DOCKER[Docker\nreproducible dev and api runtime]
+    LOG[Logging<br/>request id structured logs UI buffer]
+    CFG[Config<br/>AudioConfig WindowingConfig SmoothingConfig MergeConfig]
+    DOCKER[Docker<br/>reproducible dev and api runtime]
   end
 
   ST --> ORCH

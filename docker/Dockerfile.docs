@@ -1,0 +1,40 @@
+# Dockerfile for building PDF documentation
+#
+# Includes:
+#   - Pandoc
+#   - TeX Live (xelatex)
+#   - Node.js + mermaid-cli
+#
+# Usage:
+#   docker compose -f docker-compose.docs.yml run --rm docs-builder
+
+FROM node:20-bookworm
+
+# Prevent interactive prompts during package installation
+ENV DEBIAN_FRONTEND=noninteractive
+
+# Install system dependencies
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    pandoc \
+    texlive-xetex \
+    texlive-fonts-recommended \
+    texlive-fonts-extra \
+    texlive-latex-extra \
+    lmodern \
+    chromium \
+    fonts-liberation \
+    fonts-noto-cjk \
+    && rm -rf /var/lib/apt/lists/*
+
+# Set Puppeteer to use installed Chromium
+ENV PUPPETEER_SKIP_CHROMIUM_DOWNLOAD=true \
+    PUPPETEER_EXECUTABLE_PATH=/usr/bin/chromium
+
+# Install mermaid-cli globally
+RUN npm install -g @mermaid-js/mermaid-cli
+
+# Create workspace
+WORKDIR /workspace
+
+# Default command
+CMD ["/workspace/docs/scripts/build_docs.sh"]

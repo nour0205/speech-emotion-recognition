@@ -18,3 +18,8 @@ hf_cache/
 # OS
 .DS_Store
 Thumbs.db
+
+# Documentation build artifacts
+docs/REPORT.pdf
+docs/diagrams/
+docs/_cache/

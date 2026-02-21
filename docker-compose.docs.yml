@@ -1,0 +1,19 @@
+# Docker Compose for building documentation
+#
+# Usage:
+#   docker compose -f docker-compose.docs.yml run --rm docs-builder
+#
+# Or via Makefile:
+#   make docker-pdf
+#
+# This avoids needing to install Pandoc, LaTeX, and mermaid-cli locally.
+
+services:
+  docs-builder:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.docs
+    volumes:
+      - ./docs:/workspace/docs
+    working_dir: /workspace
+    command: ["docs/scripts/build_docs.sh"]

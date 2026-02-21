@@ -136,7 +136,49 @@ List supported emotions.
 
 Health check endpoint.
 
-## 📚 Model
+## � Building Documentation
+
+Generate a PDF version of the technical report (`docs/REPORT.md`) with rendered Mermaid diagrams.
+
+### Prerequisites
+
+1. **Pandoc** - Document converter
+   - macOS: `brew install pandoc`
+   - Ubuntu: `apt install pandoc`
+   - Or: https://pandoc.org/installing.html
+
+2. **Mermaid CLI** - Diagram renderer
+   ```bash
+   npm install -g @mermaid-js/mermaid-cli
+   ```
+
+3. **LaTeX engine** (one of these):
+   - macOS: `brew install --cask mactex` (or `brew install tectonic`)
+   - Ubuntu: `apt install texlive-xetex`
+   - Or install Tectonic: `cargo install tectonic`
+
+### Build Commands
+
+```bash
+# Build PDF locally (requires prerequisites above)
+make pdf
+
+# Build PDF using Docker (no local dependencies needed)
+make docker-pdf
+
+# Clean generated artifacts
+make clean-docs
+```
+
+The PDF will be generated at `docs/REPORT.pdf` with all Mermaid diagrams rendered as SVG images.
+
+### How It Works
+
+- A Pandoc Lua filter (`docs/filters/mermaid.lua`) detects Mermaid code blocks
+- Each diagram is rendered to SVG using `mmdc` and cached by content hash
+- Repeated builds skip unchanged diagrams for faster rebuilds
+
+## �📚 Model
 
 Uses [speechbrain/emotion-recognition-wav2vec2-IEMOCAP](https://huggingface.co/speechbrain/emotion-recognition-wav2vec2-IEMOCAP) from SpeechBrain.
 
