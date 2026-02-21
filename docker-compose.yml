@@ -12,6 +12,7 @@ services:
       - ./model:/app/model
       - ./backend:/app/backend
       - ./frontend:/app/frontend
+      - ./src:/app/src
       - ./scripts:/app/scripts
       - ./tests:/app/tests
       # Cache HuggingFace models to avoid re-downloading
@@ -25,14 +26,51 @@ services:
     stdin_open: true
     tty: true
 
-  # FastAPI Backend
+  # FastAPI API (Phase 5 - production-ready REST API)
+  api:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.api
+    container_name: ser-api
+    ports:
+      - "8000:8000"
+    volumes:
+      # Cache HuggingFace models to avoid re-downloading
+      - huggingface-cache:/root/.cache/huggingface
+    environment:
+      - PYTHONUNBUFFERED=1
+      - APP_NAME=SER Service
+      - LOG_LEVEL=INFO
+      - MODEL_ID=baseline
+      - DEVICE=cpu
+      - MAX_DURATION_SEC=600
+      - DEFAULT_WINDOW_SEC=2.0
+      - DEFAULT_HOP_SEC=0.5
+      - DEFAULT_PAD_MODE=zero
+      - DEFAULT_SMOOTHING_METHOD=hysteresis
+      - DEFAULT_HYSTERESIS_MIN_RUN=3
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "python",
+          "-c",
+          "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')",
+        ]
+      interval: 10s
+      timeout: 10s
+      retries: 20
+      start_period: 60s # Model loads faster when cached
+    restart: unless-stopped
+
+  # Legacy FastAPI Backend (from earlier phases)
   backend:
     build:
       context: .
       dockerfile: backend/Dockerfile
     container_name: ser-backend
     ports:
-      - "8000:8000"
+      - "8001:8000"
     volumes:
       # Cache HuggingFace models to avoid re-downloading
       - huggingface-cache:/root/.cache/huggingface
@@ -61,9 +99,9 @@ services:
     ports:
       - "8501:8501"
     environment:
-      - API_URL=http://backend:8000
+      - API_URL=http://api:8000
     depends_on:
-      backend:
+      api:
         condition: service_healthy
     restart: unless-stopped
 

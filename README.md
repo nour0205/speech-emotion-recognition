@@ -33,7 +33,14 @@ speech-emotion-recognition/
 │   ├── registry.py       # Model loading & caching
 │   ├── types.py          # Type definitions
 │   └── errors.py         # Custom exceptions
-├── backend/              # FastAPI backend
+├── src/api/              # REST API (Phase 5)
+│   ├── main.py           # FastAPI application
+│   ├── config.py         # Settings management
+│   ├── schemas.py        # API request/response models
+│   ├── errors.py         # Error handling & mapping
+│   ├── logging.py        # Structured logging
+│   └── deps.py           # Dependency injection
+├── backend/              # Legacy FastAPI backend
 │   ├── Dockerfile
 │   ├── main.py           # API entry point
 │   ├── core/
@@ -44,10 +51,13 @@ speech-emotion-recognition/
 │   ├── Dockerfile
 │   ├── app.py           # Web interface
 │   └── api_client.py    # Backend HTTP client
+├── docker/              # Docker configuration
+│   └── Dockerfile.api   # Production API container
 ├── scripts/             # CLI tools
 │   ├── predict_file.py  # Single file prediction
 │   ├── predict_timeline.py  # Timeline generation
 │   ├── eval_dataset.py  # Dataset evaluation
+│   ├── run_api.sh       # API server runner
 │   └── generate_fixtures.py  # Generate test audio
 ├── tests/               # Test suite
 │   ├── test_label_mapping.py
@@ -55,6 +65,9 @@ speech-emotion-recognition/
 │   ├── test_timeline_smoothing.py   # Phase 4 tests
 │   ├── test_timeline_merge.py       # Phase 4 tests
 │   ├── test_timeline_generate.py    # Phase 4 tests
+│   ├── test_api_health.py           # Phase 5 tests
+│   ├── test_api_predict.py          # Phase 5 tests
+│   ├── test_api_timeline.py         # Phase 5 tests
 │   └── fixtures/
 ├── requirements/
 │   ├── base.txt         # Core ML dependencies
@@ -71,17 +84,35 @@ speech-emotion-recognition/
 ### Using Docker
 
 ```bash
-# Start both services
+# Build and start the API service
+docker compose build api
+docker compose up api
 
-# Or build fresh and start
+# Or start all services (API + frontend)
 docker compose up --build
 ```
 
 Services will be available at:
 
-- **Frontend:** <http://localhost:8501>
-- **Backend API:** <http://localhost:8000>
+- **API:** <http://localhost:8000>
 - **API Docs:** <http://localhost:8000/docs>
+- **Frontend:** <http://localhost:8501>
+
+### Quick Test
+
+```bash
+# Health check
+curl http://localhost:8000/health
+
+# Predict emotion
+curl -X POST http://localhost:8000/predict -F "file=@sample.wav"
+
+# Generate timeline
+curl -X POST http://localhost:8000/timeline \
+  -F "file=@sample.wav" \
+  -F "window_sec=2.0" \
+  -F "hop_sec=0.5"
+```
 
 Stop with `Ctrl+C` or:
 
@@ -858,6 +889,187 @@ make docker-dev     # Interactive dev container
 make docker-test    # Run tests in Docker
 make fixtures       # Generate test audio files
 make predict FILE=audio.wav  # Predict emotion
+```
+
+## 🌐 REST API (Phase 5)
+
+The REST API provides production-ready endpoints for emotion prediction and timeline generation.
+
+### Building and Running the API
+
+```bash
+# Build the API container
+docker compose build api
+
+# Start the API service
+docker compose up api
+
+# Or start all services (API, frontend, etc.)
+docker compose up
+```
+
+The API will be available at:
+
+- **API:** <http://localhost:8000>
+- **OpenAPI Docs:** <http://localhost:8000/docs>
+- **ReDoc:** <http://localhost:8000/redoc>
+
+### API Endpoints
+
+#### `GET /health`
+
+Check service health and model status.
+
+```bash
+curl http://localhost:8000/health
+```
+
+**Response:**
+
+```json
+{
+  "status": "ok",
+  "model_id": "baseline",
+  "device": "cpu"
+}
+```
+
+#### `POST /predict`
+
+Predict emotion from a single audio clip.
+
+```bash
+curl -X POST http://localhost:8000/predict \
+  -F "file=@sample.wav"
+```
+
+With scores:
+
+```bash
+curl -X POST http://localhost:8000/predict \
+  -F "file=@sample.wav" \
+  -F "include_scores=true"
+```
+
+**Response:**
+
+```json
+{
+  "emotion": "happy",
+  "confidence": 0.85,
+  "scores": {"angry": 0.05, "happy": 0.85, "neutral": 0.05, "sad": 0.05},
+  "model_name": "speechbrain-iemocap",
+  "duration_sec": 2.5
+}
+```
+
+#### `POST /timeline`
+
+Generate an emotion timeline for longer audio.
+
+```bash
+curl -X POST http://localhost:8000/timeline \
+  -F "file=@sample.wav" \
+  -F "window_sec=2.0" \
+  -F "hop_sec=0.5"
+```
+
+With all options:
+
+```bash
+curl -X POST http://localhost:8000/timeline \
+  -F "file=@sample.wav" \
+  -F "window_sec=2.0" \
+  -F "hop_sec=0.5" \
+  -F "pad_mode=zero" \
+  -F "smoothing_method=hysteresis" \
+  -F "hysteresis_min_run=3" \
+  -F "include_windows=true" \
+  -F "include_scores=true"
+```
+
+**Response:**
+
+```json
+{
+  "model_name": "speechbrain-iemocap",
+  "sample_rate": 16000,
+  "duration_sec": 10.5,
+  "window_sec": 2.0,
+  "hop_sec": 0.5,
+  "pad_mode": "zero",
+  "smoothing": {"method": "hysteresis", "hysteresis_min_run": 3},
+  "segments": [
+    {"start_sec": 0.0, "end_sec": 3.5, "emotion": "neutral", "confidence": 0.82},
+    {"start_sec": 3.5, "end_sec": 7.0, "emotion": "happy", "confidence": 0.91},
+    {"start_sec": 7.0, "end_sec": 10.5, "emotion": "neutral", "confidence": 0.78}
+  ]
+}
+```
+
+### API Parameters
+
+| Parameter | Endpoint | Type | Default | Description |
+|-----------|----------|------|---------|-------------|
+| `file` | Both | UploadFile | Required | WAV audio file |
+| `include_scores` | Both | bool | false | Include per-label scores |
+| `window_sec` | /timeline | float | 2.0 | Window duration (seconds) |
+| `hop_sec` | /timeline | float | 0.5 | Hop stride (seconds) |
+| `pad_mode` | /timeline | string | "zero" | Padding: none, zero, reflect |
+| `smoothing_method` | /timeline | string | "hysteresis" | Smoothing: none, majority, hysteresis, ema |
+| `hysteresis_min_run` | /timeline | int | 3 | Min windows to switch emotion |
+| `majority_window` | /timeline | int | 5 | Majority voting window size |
+| `ema_alpha` | /timeline | float | 0.6 | EMA smoothing coefficient |
+| `include_windows` | /timeline | bool | false | Include per-window predictions |
+
+### Error Handling
+
+All errors return a consistent JSON structure:
+
+```json
+{
+  "error": {
+    "code": "INVALID_AUDIO",
+    "message": "Failed to decode audio file",
+    "details": {"filename": "test.txt"}
+  }
+}
+```
+
+| Error Code | HTTP Status | Description |
+|------------|-------------|-------------|
+| `INVALID_AUDIO` | 400 | Audio file cannot be decoded |
+| `INVALID_INPUT` | 422 | Request validation failed |
+| `INVALID_WINDOWING` | 422 | Invalid windowing configuration |
+| `MODEL_LOAD_FAILED` | 500 | Model loading error |
+| `INFERENCE_FAILED` | 500 | Model inference error |
+| `INTERNAL_ERROR` | 500 | Unexpected server error |
+
+### Environment Variables
+
+Configure the API via environment variables:
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `APP_NAME` | SER Service | Application name |
+| `LOG_LEVEL` | INFO | Logging level |
+| `MODEL_ID` | baseline | Model identifier |
+| `DEVICE` | cpu | Inference device (cpu/cuda) |
+| `MAX_DURATION_SEC` | 600 | Max audio duration |
+| `DEFAULT_WINDOW_SEC` | 2.0 | Default window size |
+| `DEFAULT_HOP_SEC` | 0.5 | Default hop size |
+| `DEFAULT_PAD_MODE` | zero | Default padding |
+| `DEFAULT_SMOOTHING_METHOD` | hysteresis | Default smoothing |
+| `DEFAULT_HYSTERESIS_MIN_RUN` | 3 | Default hysteresis param |
+
+### Running Tests
+
+```bash
+# Run API tests (no model required)
+docker compose run --rm dev pytest tests/test_api_health.py tests/test_api_predict.py tests/test_api_timeline.py -v
+
+# Run with integration tests (downloads model)
+docker compose run --rm -e RUN_INTEGRATION_TESTS=1 dev pytest tests/test_api_*.py -v
 ```
 
 ## 📄 License

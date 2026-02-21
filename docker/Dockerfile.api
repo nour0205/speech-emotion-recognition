@@ -1,0 +1,79 @@
+# Multi-stage Dockerfile for SER API service
+# Stage 1: Builder - install dependencies
+# Stage 2: Runtime - minimal image with app and deps
+
+# =============================================================================
+# Stage 1: Builder
+# =============================================================================
+FROM python:3.11-slim AS builder
+
+WORKDIR /build
+
+# Install build dependencies
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    build-essential \
+    git \
+    && rm -rf /var/lib/apt/lists/*
+
+# Copy requirements
+COPY requirements/ requirements/
+
+# Create virtual environment and install deps
+RUN python -m venv /opt/venv
+ENV PATH="/opt/venv/bin:$PATH"
+
+# Install dependencies in order (base first, then backend-specific)
+RUN pip install --no-cache-dir --upgrade pip wheel && \
+    pip install --no-cache-dir -r requirements/base.txt && \
+    pip install --no-cache-dir fastapi uvicorn[standard] python-multipart pydantic-settings
+
+
+# =============================================================================
+# Stage 2: Runtime
+# =============================================================================
+FROM python:3.11-slim AS runtime
+
+WORKDIR /app
+
+# Install runtime system dependencies for audio processing
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    libsndfile1 \
+    ffmpeg \
+    && rm -rf /var/lib/apt/lists/* \
+    && apt-get clean
+
+# Copy virtual environment from builder
+COPY --from=builder /opt/venv /opt/venv
+ENV PATH="/opt/venv/bin:$PATH"
+
+# Set Python environment variables
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1 \
+    PYTHONPATH=/app
+
+# Copy application code
+COPY audioio/ /app/audioio/
+COPY timeline/ /app/timeline/
+COPY model/ /app/model/
+COPY src/ /app/src/
+
+# Create non-root user for security
+RUN useradd --create-home --shell /bin/bash appuser && \
+    chown -R appuser:appuser /app
+USER appuser
+
+# Expose port
+EXPOSE 8000
+
+# Health check
+HEALTHCHECK --interval=30s --timeout=10s --start-period=60s --retries=3 \
+    CMD python -c "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')" || exit 1
+
+# Default environment variables
+ENV APP_NAME="SER Service" \
+    LOG_LEVEL="INFO" \
+    MODEL_ID="baseline" \
+    DEVICE="cpu"
+
+# Run the API server
+CMD ["uvicorn", "src.api.main:app", "--host", "0.0.0.0", "--port", "8000"]
