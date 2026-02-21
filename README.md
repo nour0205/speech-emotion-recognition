@@ -15,24 +15,47 @@ Detect emotions from speech audio using a Wav2Vec2 model trained on IEMOCAP.
 
 ```
 speech-emotion-recognition/
-├── backend/                 # FastAPI backend
+├── audioio/                # Audio I/O module (Phase 1)
+│   ├── loader.py          # WAV loading
+│   ├── validate.py        # Audio validation
+│   ├── preprocess.py      # Preprocessing pipeline
+│   └── errors.py          # Custom exceptions
+├── timeline/              # Timeline windowing (Phase 2)
+│   ├── windowing.py       # Audio segmentation
+│   └── errors.py          # Custom exceptions
+├── model/                 # Emotion inference (Phase 3)
+│   ├── infer.py          # Main inference functions
+│   ├── labels.py         # Canonical labels & mapping
+│   ├── registry.py       # Model loading & caching
+│   ├── types.py          # Type definitions
+│   └── errors.py         # Custom exceptions
+├── backend/              # FastAPI backend
 │   ├── Dockerfile
-│   ├── main.py             # API entry point
+│   ├── main.py           # API entry point
 │   ├── core/
-│   │   └── model.py        # Emotion classifier
+│   │   └── model.py      # Emotion classifier
 │   └── schemas/
-│       └── emotion.py      # Pydantic models
-├── frontend/               # Streamlit UI
+│       └── emotion.py    # Pydantic models
+├── frontend/             # Streamlit UI
 │   ├── Dockerfile
-│   ├── app.py             # Web interface
-│   └── api_client.py      # Backend HTTP client
+│   ├── app.py           # Web interface
+│   └── api_client.py    # Backend HTTP client
+├── scripts/             # CLI tools
+│   ├── predict_file.py  # Single file prediction
+│   ├── eval_dataset.py  # Dataset evaluation
+│   └── generate_fixtures.py  # Generate test audio
+├── tests/               # Test suite
+│   ├── test_label_mapping.py
+│   ├── test_model_infer_smoke.py
+│   └── fixtures/
 ├── requirements/
-│   ├── base.txt           # Core ML dependencies
-│   ├── backend.txt        # FastAPI dependencies
-│   ├── frontend.txt       # Streamlit dependencies
-│   └── dev.txt            # Development tools
-├── docker-compose.yml     # Container orchestration
-└── Makefile               # Convenience commands
+│   ├── base.txt         # Core ML dependencies
+│   ├── backend.txt      # FastAPI dependencies
+│   ├── frontend.txt     # Streamlit dependencies
+│   └── dev.txt          # Development tools
+├── docker-compose.yml   # Container orchestration
+├── Dockerfile.dev       # Development container
+└── Makefile             # Convenience commands
 ```
 
 ## 🚀 Quick Start
@@ -301,6 +324,263 @@ windows = segment_audio(waveform, sr, config)
 for w in windows:
     # emotion = model.predict(w["waveform"])
     print(f"{w['start_sec']:.1f}s - {w['end_sec']:.1f}s")
+```
+
+## 🧠 Model Inference Module (Phase 3)
+
+The `model` module provides speech emotion recognition inference using a pretrained SpeechBrain wav2vec2 model trained on IEMOCAP.
+
+### Quick Start
+
+```python
+from model import predict_clip, predict_waveform, CANONICAL_LABELS
+
+# Predict from audio file
+result = predict_clip("speech.wav")
+print(f"Emotion: {result.emotion}")
+print(f"Confidence: {result.confidence:.2%}")
+print(f"All scores: {result.scores}")
+
+# Predict from bytes (e.g., uploaded file)
+with open("speech.wav", "rb") as f:
+    result = predict_clip(f.read())
+
+# Predict from preprocessed waveform
+import torch
+waveform = torch.randn(1, 32000).float()  # [1, T] mono float32
+result = predict_waveform(waveform, sample_rate=16000)
+```
+
+### Canonical Labels
+
+The project uses these canonical emotion labels:
+
+| Canonical | Description | Supported by Baseline |
+|-----------|-------------|----------------------|
+| `neutral` | No strong emotion | ✅ |
+| `happy` | Joy, positive | ✅ |
+| `sad` | Sorrow, negative | ✅ |
+| `angry` | Anger, frustration | ✅ |
+| `fear` | Fear, anxiety | ❌ |
+| `disgust` | Revulsion | ❌ |
+| `surprise` | Unexpected | ❌ |
+
+**Note:** The baseline model (SpeechBrain IEMOCAP) only supports 4 emotions. Labels marked ❌ will always have 0.0 probability in the output.
+
+### Label Mapping
+
+The baseline model outputs IEMOCAP labels which are mapped to canonical labels:
+
+| Model Output | Canonical Label |
+|--------------|-----------------|
+| `neu` | `neutral` |
+| `hap` | `happy` |
+| `sad` | `sad` |
+| `ang` | `angry` |
+
+```python
+from model.labels import map_raw_to_canonical
+
+raw_scores = {"neu": 0.1, "hap": 0.6, "sad": 0.2, "ang": 0.1}
+canonical = map_raw_to_canonical(raw_scores)
+# {'neutral': 0.1, 'happy': 0.6, 'sad': 0.2, 'angry': 0.1, 'fear': 0.0, ...}
+```
+
+### PredictionResult
+
+The inference functions return a `PredictionResult` object:
+
+```python
+@dataclass
+class PredictionResult:
+    emotion: str           # Canonical label (e.g., "happy")
+    confidence: float      # Probability of predicted emotion (0.0-1.0)
+    scores: dict[str, float]  # All canonical labels -> probabilities
+    model_name: str        # Model identifier
+    raw_label: str | None  # Original model label
+    raw_scores: dict | None  # Original model scores
+    duration_sec: float    # Audio duration in seconds
+
+# Convert to dict for JSON serialization
+result.to_dict()
+```
+
+### CLI: Single File Prediction
+
+```bash
+# Basic usage
+python scripts/predict_file.py --input speech.wav
+
+# Pretty-print output
+python scripts/predict_file.py --input speech.wav --pretty
+
+# Using Docker
+docker compose run --rm dev python scripts/predict_file.py --input tests/fixtures/example.wav --pretty
+```
+
+Example output:
+```json
+{
+  "emotion": "happy",
+  "confidence": 0.85,
+  "scores": {
+    "neutral": 0.05,
+    "happy": 0.85,
+    "sad": 0.05,
+    "angry": 0.05,
+    "fear": 0.0,
+    "disgust": 0.0,
+    "surprise": 0.0
+  },
+  "model_name": "speechbrain-iemocap",
+  "raw_label": "hap",
+  "duration_sec": 2.5
+}
+```
+
+### CLI: Dataset Evaluation
+
+Evaluate on a folder-organized dataset:
+
+```
+dataset/
+  angry/*.wav
+  happy/*.wav
+  sad/*.wav
+  neutral/*.wav
+```
+
+```bash
+# Basic evaluation
+python scripts/eval_dataset.py --data_root ./dataset
+
+# Limit samples per class
+python scripts/eval_dataset.py --data_root ./dataset --limit_per_class 100
+
+# With confusion matrix
+python scripts/eval_dataset.py --data_root ./dataset --confusion
+
+# Save results to JSON
+python scripts/eval_dataset.py --data_root ./dataset --json results.json
+```
+
+Example output:
+```
+Evaluation Results
+==================
+Total samples: 400
+Overall accuracy: 78.5%
+Macro F1: 0.760
+
+Per-class results:
+--------------------------------------------------
+angry        Acc: 80.0%  F1: 0.780  (80/100)
+happy        Acc: 75.0%  F1: 0.740  (75/100)
+neutral      Acc: 77.0%  F1: 0.765  (77/100)
+sad          Acc: 82.0%  F1: 0.815  (82/100)
+```
+
+### Model Registry
+
+Models are cached for efficient reuse:
+
+```python
+from model.registry import get_model, list_available_models
+
+# List available models
+print(list_available_models())  # ['baseline', 'speechbrain-iemocap']
+
+# Get a model
+model = get_model("baseline", device="cpu")
+raw_scores = model.predict(waveform, sample_rate=16000)
+```
+
+### Error Handling
+
+```python
+from model import predict_clip
+from model.errors import ModelError, ModelLoadError, InferenceError
+
+try:
+    result = predict_clip("speech.wav")
+except ModelLoadError as e:
+    print(f"Model error: [{e.code}] {e.message}")
+except InferenceError as e:
+    print(f"Inference error: [{e.code}] {e.message}")
+```
+
+### Error Codes
+
+| Code | Exception | Description |
+|------|-----------|-------------|
+| `MODEL_NOT_FOUND` | ModelLoadError | Unknown model ID |
+| `DOWNLOAD_FAILED` | ModelLoadError | Failed to download model |
+| `LOAD_FAILED` | ModelLoadError | Model loading failed |
+| `INVALID_INPUT` | InferenceError | Invalid waveform input |
+| `INFERENCE_FAILED` | InferenceError | Model forward pass failed |
+
+### First Run / Model Download
+
+On first run, the SpeechBrain model (~360MB) is downloaded from HuggingFace Hub. This happens automatically and is cached for subsequent runs.
+
+To pre-download the model:
+```bash
+# In Docker
+docker compose run --rm dev python -c "from model import get_model; get_model('baseline')"
+
+# Locally
+python -c "from model import get_model; get_model('baseline')"
+```
+
+### Integration Example
+
+Complete pipeline from audio file to emotion prediction:
+
+```python
+from audioio import load_validate_preprocess, AudioConfig
+from timeline import WindowingConfig, segment_audio
+from model import predict_waveform
+
+# Phase 1: Load audio
+waveform, sr = load_validate_preprocess("long_speech.wav")
+
+# Phase 2: Segment into windows
+windows = segment_audio(waveform, sr, WindowingConfig(window_sec=2.0, hop_sec=1.0))
+
+# Phase 3: Predict emotion for each window
+for w in windows:
+    result = predict_waveform(w["waveform"], sample_rate=sr)
+    print(f"{w['start_sec']:.1f}s: {result.emotion} ({result.confidence:.0%})")
+```
+
+## 🐳 Docker Development
+
+### Running in Docker
+
+```bash
+# Build and run the dev container
+docker compose run --rm dev bash
+
+# Run tests in Docker
+docker compose run --rm dev pytest -v
+
+# Run tests with integration tests (downloads model)
+docker compose run --rm -e RUN_INTEGRATION_TESTS=1 dev pytest -v
+
+# Run prediction
+docker compose run --rm dev python scripts/predict_file.py --input tests/fixtures/example.wav --pretty
+
+# Generate test fixtures
+docker compose run --rm dev python scripts/generate_fixtures.py
+```
+
+### Makefile Commands
+
+```bash
+make docker-dev     # Interactive dev container
+make docker-test    # Run tests in Docker
+make fixtures       # Generate test audio files
+make predict FILE=audio.wav  # Predict emotion
 ```
 
 ## 📄 License

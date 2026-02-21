@@ -1,4 +1,30 @@
 services:
+  # Development container for running tests and scripts
+  dev:
+    build:
+      context: .
+      dockerfile: Dockerfile.dev
+    container_name: ser-dev
+    volumes:
+      # Mount source code for live editing
+      - ./audioio:/app/audioio
+      - ./timeline:/app/timeline
+      - ./model:/app/model
+      - ./backend:/app/backend
+      - ./frontend:/app/frontend
+      - ./scripts:/app/scripts
+      - ./tests:/app/tests
+      # Cache HuggingFace models to avoid re-downloading
+      - huggingface-cache:/root/.cache/huggingface
+      # Cache pip packages
+      - pip-cache:/root/.cache/pip
+    environment:
+      - PYTHONUNBUFFERED=1
+      - PYTHONPATH=/app
+    working_dir: /app
+    stdin_open: true
+    tty: true
+
   # FastAPI Backend
   backend:
     build:
@@ -44,3 +70,5 @@ services:
 volumes:
   huggingface-cache:
     name: ser-huggingface-cache
+  pip-cache:
+    name: ser-pip-cache

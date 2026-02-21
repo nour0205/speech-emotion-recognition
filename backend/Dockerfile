@@ -16,9 +16,16 @@ COPY requirements/backend.txt requirements/backend.txt
 # Install Python dependencies
 RUN pip install --no-cache-dir -r requirements/backend.txt
 
+# Copy shared modules
+COPY audioio/ audioio/
+COPY timeline/ timeline/
+COPY model/ model/
+
 # Copy backend code
 COPY backend/ backend/
-COPY infer.py .
+
+# Set PYTHONPATH
+ENV PYTHONPATH=/app
 
 # Expose port
 EXPOSE 8000
