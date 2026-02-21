@@ -20,8 +20,12 @@ speech-emotion-recognition/
 │   ├── validate.py        # Audio validation
 │   ├── preprocess.py      # Preprocessing pipeline
 │   └── errors.py          # Custom exceptions
-├── timeline/              # Timeline windowing (Phase 2)
-│   ├── windowing.py       # Audio segmentation
+├── timeline/              # Timeline windowing & generation (Phase 2 & 4)
+│   ├── windowing.py       # Audio segmentation (Phase 2)
+│   ├── generate.py        # Timeline orchestration (Phase 4)
+│   ├── smooth.py          # Smoothing strategies (Phase 4)
+│   ├── merge.py           # Segment merging (Phase 4)
+│   ├── schema.py          # Output data structures (Phase 4)
 │   └── errors.py          # Custom exceptions
 ├── model/                 # Emotion inference (Phase 3)
 │   ├── infer.py          # Main inference functions
@@ -42,11 +46,15 @@ speech-emotion-recognition/
 │   └── api_client.py    # Backend HTTP client
 ├── scripts/             # CLI tools
 │   ├── predict_file.py  # Single file prediction
+│   ├── predict_timeline.py  # Timeline generation
 │   ├── eval_dataset.py  # Dataset evaluation
 │   └── generate_fixtures.py  # Generate test audio
 ├── tests/               # Test suite
 │   ├── test_label_mapping.py
 │   ├── test_model_infer_smoke.py
+│   ├── test_timeline_smoothing.py   # Phase 4 tests
+│   ├── test_timeline_merge.py       # Phase 4 tests
+│   ├── test_timeline_generate.py    # Phase 4 tests
 │   └── fixtures/
 ├── requirements/
 │   ├── base.txt         # Core ML dependencies
@@ -553,6 +561,272 @@ for w in windows:
     print(f"{w['start_sec']:.1f}s: {result.emotion} ({result.confidence:.0%})")
 ```
 
+## 🎭 Timeline Emotion Generation (Phase 4)
+
+The Phase 4 timeline module provides complete emotion timeline generation, including windowing, inference, smoothing, and segment merging. It produces clean, stable emotion timelines from audio files.
+
+### Quick Start
+
+```python
+from timeline import generate_timeline, SmoothingConfig, MergeConfig, WindowingConfig
+
+# Generate timeline from audio file (simplest usage)
+result = generate_timeline("speech.wav")
+
+# Print emotion segments
+for segment in result.segments:
+    print(f"{segment.start_sec:.2f}s - {segment.end_sec:.2f}s: {segment.emotion} ({segment.confidence:.0%})")
+
+# Output:
+# 0.00s - 3.50s: neutral (82%)
+# 3.50s - 7.00s: happy (91%)
+# 7.00s - 10.50s: neutral (78%)
+```
+
+### Full Configuration
+
+```python
+from timeline import (
+    generate_timeline,
+    generate_timeline_from_waveform,
+    WindowingConfig,
+    SmoothingConfig,
+    MergeConfig,
+)
+from audioio import AudioConfig
+
+# Configure each stage
+windowing_config = WindowingConfig(
+    window_sec=2.0,      # 2-second analysis windows
+    hop_sec=0.5,         # 0.5-second hop (75% overlap)
+    pad_mode="zero",     # Zero-pad partial windows
+)
+
+smoothing_config = SmoothingConfig(
+    method="hysteresis",     # Recommended smoothing method
+    hysteresis_min_run=3,    # Require 3 consecutive windows to switch emotion
+)
+
+merge_config = MergeConfig(
+    merge_adjacent=True,     # Merge same-emotion segments
+    min_segment_sec=0.25,    # Minimum segment duration
+    drop_short_segments=False,
+)
+
+# Generate timeline with full control
+result = generate_timeline(
+    path_or_bytes="speech.wav",
+    audio_config=AudioConfig(),
+    windowing_config=windowing_config,
+    model_id="baseline",
+    device="cpu",
+    smoothing_config=smoothing_config,
+    merge_config=merge_config,
+    include_windows=True,    # Include per-window predictions
+    include_scores=True,     # Include per-label probability scores
+)
+
+# Access results
+print(f"Duration: {result.duration_sec:.2f}s")
+print(f"Segments: {result.segment_count}")
+print(f"Windows: {result.window_count}")
+```
+
+### Output Schema
+
+The `TimelineResult` object contains:
+
+```python
+@dataclass
+class TimelineResult:
+    model_name: str           # Model used for inference
+    sample_rate: int          # Audio sample rate (Hz)
+    duration_sec: float       # Total audio duration
+    window_sec: float         # Window duration used
+    hop_sec: float            # Hop duration used
+    pad_mode: str             # Padding mode used
+    smoothing: dict           # Smoothing config applied
+    segments: list[Segment]   # Emotion segments
+    windows: list | None      # Per-window predictions (if requested)
+    is_padded_timeline: bool  # Whether any window was padded
+    merge_config: dict        # Merge config applied
+```
+
+Each `Segment` contains:
+
+```python
+@dataclass
+class Segment:
+    start_sec: float          # Segment start time
+    end_sec: float            # Segment end time
+    emotion: str              # Canonical emotion label
+    confidence: float         # Average confidence (0.0-1.0)
+    scores: dict | None       # Average per-label scores (if requested)
+    window_count: int         # Number of windows merged
+```
+
+### JSON Output
+
+Convert to JSON for serialization:
+
+```python
+# Convert to dict
+data = result.to_dict(include_windows=True, include_scores=True)
+
+# Serialize to JSON
+import json
+json_output = json.dumps(data, indent=2)
+```
+
+Example JSON output:
+
+```json
+{
+  "model_name": "baseline",
+  "sample_rate": 16000,
+  "duration_sec": 10.5,
+  "window_sec": 2.0,
+  "hop_sec": 0.5,
+  "pad_mode": "zero",
+  "smoothing": {
+    "method": "hysteresis",
+    "hysteresis_min_run": 3
+  },
+  "is_padded_timeline": true,
+  "segments": [
+    {
+      "start_sec": 0.0,
+      "end_sec": 3.5,
+      "emotion": "neutral",
+      "confidence": 0.82
+    },
+    {
+      "start_sec": 3.5,
+      "end_sec": 7.0,
+      "emotion": "happy",
+      "confidence": 0.91
+    },
+    {
+      "start_sec": 7.0,
+      "end_sec": 10.5,
+      "emotion": "neutral",
+      "confidence": 0.78
+    }
+  ]
+}
+```
+
+### Smoothing Methods
+
+The smoothing stage reduces jitter in window-by-window predictions:
+
+| Method | Description | Best For |
+|--------|-------------|----------|
+| `none` | No smoothing | Debugging, analysis |
+| `majority` | Majority vote in sliding window | General stabilization |
+| `hysteresis` | Require N consecutive windows to switch (recommended) | Clean transitions |
+| `ema` | Exponential moving average on scores | Smooth probability curves |
+
+#### Hysteresis Smoothing (Recommended)
+
+Hysteresis requires a new emotion to persist for `hysteresis_min_run` consecutive windows before switching:
+
+```python
+# Example: [A, A, A, B, B] with min_run=3
+# Output: [A, A, A, A, A]  (B only persists 2 windows, not enough to switch)
+
+# Example: [A, A, A, B, B, B] with min_run=3
+# Output: [A, A, A, B, B, B]  (B persists 3 windows, switch happens at first B)
+```
+
+#### Majority Smoothing
+
+Replaces each window's emotion with the majority in a centered sliding window:
+
+```python
+SmoothingConfig(
+    method="majority",
+    majority_window=5,  # Must be odd; looks at 5 windows centered on each position
+)
+```
+
+#### EMA Smoothing
+
+Applies exponential moving average to per-label probability scores:
+
+```python
+SmoothingConfig(
+    method="ema",
+    ema_alpha=0.6,  # Higher = more weight to recent predictions
+)
+```
+
+### CLI: Timeline Generation
+
+```bash
+# Basic usage
+python scripts/predict_timeline.py --input speech.wav
+
+# With custom windowing
+python scripts/predict_timeline.py --input speech.wav --window_sec 3.0 --hop_sec 1.0
+
+# With smoothing options
+python scripts/predict_timeline.py --input speech.wav --smoothing hysteresis --hysteresis_min_run 4
+python scripts/predict_timeline.py --input speech.wav --smoothing majority --majority_window 7
+python scripts/predict_timeline.py --input speech.wav --smoothing ema --ema_alpha 0.7
+
+# Include window predictions and scores
+python scripts/predict_timeline.py --input speech.wav --include_windows --include_scores --pretty
+
+# Save to file
+python scripts/predict_timeline.py --input speech.wav --output timeline.json --pretty
+
+# Using Docker
+docker compose run --rm dev python scripts/predict_timeline.py --input tests/fixtures/example.wav --pretty
+```
+
+### Recommended Defaults
+
+For most speech emotion recognition use cases:
+
+```python
+# Recommended configuration
+windowing_config = WindowingConfig(
+    window_sec=2.0,     # 2-second windows capture prosodic patterns
+    hop_sec=0.5,        # 75% overlap for smooth timeline
+    pad_mode="zero",
+)
+
+smoothing_config = SmoothingConfig(
+    method="hysteresis",
+    hysteresis_min_run=3,   # Requires ~1.5s persistence to switch
+)
+
+merge_config = MergeConfig(
+    merge_adjacent=True,
+    min_segment_sec=0.5,    # Minimum 0.5s segments
+    drop_short_segments=False,
+)
+```
+
+### Error Handling
+
+```python
+from timeline import generate_timeline
+from timeline.errors import TimelineError, WindowingConfigError, WindowingRuntimeError
+from audioio.errors import AudioIOError
+from model.errors import ModelError
+
+try:
+    result = generate_timeline("speech.wav")
+except AudioIOError as e:
+    print(f"Audio error: [{e.code}] {e.message}")
+except ModelError as e:
+    print(f"Model error: [{e.code}] {e.message}")
+except TimelineError as e:
+    print(f"Timeline error: [{e.code}] {e.message}")
+```
+
 ## 🐳 Docker Development
 
 ### Running in Docker
@@ -569,6 +843,9 @@ docker compose run --rm -e RUN_INTEGRATION_TESTS=1 dev pytest -v
 
 # Run prediction
 docker compose run --rm dev python scripts/predict_file.py --input tests/fixtures/example.wav --pretty
+
+# Run timeline generation
+docker compose run --rm dev python scripts/predict_timeline.py --input tests/fixtures/example.wav --pretty
 
 # Generate test fixtures
 docker compose run --rm dev python scripts/generate_fixtures.py
