@@ -206,6 +206,30 @@ class TimelineResponse(BaseModel):
         description="Per-window predictions (if include_windows=true)",
     )
 
+# =============================================================================
+# Timeline Endpoint for unreal engine
+# =============================================================================
+
+class UnrealSegmentSchema(BaseModel):
+    """Schema for a single Unreal-ready emotion segment."""
+
+    start_sec: float = Field(ge=0.0, examples=[0.0])
+    end_sec: float = Field(ge=0.0, examples=[1.0])
+    emotion: str = Field(examples=["happy", "sad", "angry", "neutral"])
+    confidence: float = Field(ge=0.0, le=1.0, examples=[0.85])
+
+
+class UnrealTimelineResponse(BaseModel):
+    """Simplified timeline contract for Unreal Engine."""
+
+    type: Literal["timeline"] = Field(default="timeline")
+    source: str = Field(default="ser_api", examples=["ser_api"])
+    version: str = Field(default="1.0", examples=["1.0"])
+    duration_sec: float = Field(ge=0.0, examples=[10.5])
+    segments: list[UnrealSegmentSchema]
+
+
+
 
 # =============================================================================
 # Error Response

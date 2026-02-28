@@ -46,6 +46,8 @@ from .schemas import (
     SegmentSchema,
     TimelineResponse,
     WindowSchema,
+    UnrealSegmentSchema,
+    UnrealTimelineResponse,
 )
 
 
@@ -450,6 +452,126 @@ def register_routes(app: FastAPI) -> None:
             smoothing=result.smoothing,
             segments=segments,
             windows=windows,
+        )
+    
+
+        # =========================================================================
+    # Unreal Timeline Endpoint (Simplified Contract)
+    # =========================================================================
+
+    @app.post(
+        "/timeline/unreal",
+        response_model=UnrealTimelineResponse,
+        tags=["Unreal"],
+        summary="Generate Unreal-ready emotion timeline",
+        description="Returns a simplified emotion timeline JSON contract for Unreal Engine consumption.",
+    )
+    async def timeline_unreal(
+        file: Annotated[UploadFile, File(description="WAV audio file")],
+        window_sec: Annotated[float | None, Form(description="Window duration in seconds", gt=0)] = None,
+        hop_sec: Annotated[float | None, Form(description="Hop/stride duration in seconds", gt=0)] = None,
+        pad_mode: Annotated[str | None, Form(description="Padding mode: none, zero, or reflect")] = None,
+        smoothing_method: Annotated[str | None, Form(description="Smoothing method: none, majority, hysteresis, or ema")] = None,
+        hysteresis_min_run: Annotated[int | None, Form(description="Min consecutive windows for emotion switch (hysteresis)", ge=1)] = None,
+        majority_window: Annotated[int | None, Form(description="Window size for majority voting (must be odd)", ge=1)] = None,
+        ema_alpha: Annotated[float | None, Form(description="EMA alpha coefficient (0-1)", gt=0, le=1)] = None,
+    ) -> UnrealTimelineResponse:
+        settings = get_settings()
+
+        # Defaults (same as /timeline)
+        if window_sec is None:
+            window_sec = settings.default_window_sec
+        if hop_sec is None:
+            hop_sec = settings.default_hop_sec
+        if pad_mode is None:
+            pad_mode = settings.default_pad_mode
+        if smoothing_method is None:
+            smoothing_method = settings.default_smoothing_method
+        if hysteresis_min_run is None:
+            hysteresis_min_run = settings.default_hysteresis_min_run
+        if majority_window is None:
+            majority_window = settings.default_majority_window
+        if ema_alpha is None:
+            ema_alpha = settings.default_ema_alpha
+
+        # Validate hop_sec <= window_sec
+        if hop_sec > window_sec:
+            raise InvalidWindowingError(
+                message=f"hop_sec ({hop_sec}) cannot exceed window_sec ({window_sec})",
+                details={"hop_sec": hop_sec, "window_sec": window_sec},
+            )
+
+        # Validate pad_mode
+        valid_pad_modes = {"none", "zero", "reflect"}
+        if pad_mode not in valid_pad_modes:
+            raise InvalidWindowingError(
+                message=f"Invalid pad_mode: {pad_mode}. Must be one of {valid_pad_modes}",
+                details={"pad_mode": pad_mode, "valid_modes": list(valid_pad_modes)},
+            )
+
+        # Validate smoothing_method
+        valid_smoothing_methods = {"none", "majority", "hysteresis", "ema"}
+        if smoothing_method not in valid_smoothing_methods:
+            raise InvalidInputError(
+                message=f"Invalid smoothing_method: {smoothing_method}. Must be one of {valid_smoothing_methods}",
+                details={
+                    "smoothing_method": smoothing_method,
+                    "valid_methods": list(valid_smoothing_methods),
+                },
+            )
+
+        # Read file bytes
+        audio_bytes = await file.read()
+        if not audio_bytes:
+            raise InvalidInputError(
+                message="Empty file uploaded",
+                details={"filename": file.filename},
+            )
+
+        # Build configurations
+        audio_config = get_audio_config(settings)
+
+        windowing_config = WindowingConfig(
+            window_sec=window_sec,
+            hop_sec=hop_sec,
+            pad_mode=pad_mode,
+        )
+
+        smoothing_config = SmoothingConfig(
+            method=smoothing_method,
+            hysteresis_min_run=hysteresis_min_run,
+            majority_window=majority_window,
+            ema_alpha=ema_alpha,
+        )
+
+        merge_config = MergeConfig()
+
+        # Generate timeline (no windows/scores for Unreal)
+        result = generate_timeline(
+            path_or_bytes=audio_bytes,
+            audio_config=audio_config,
+            windowing_config=windowing_config,
+            model_id=settings.model_id,
+            device=settings.device,
+            smoothing_config=smoothing_config,
+            merge_config=merge_config,
+            include_windows=False,
+            include_scores=False,
+        )
+
+        segments = [
+            UnrealSegmentSchema(
+                start_sec=float(seg.start_sec),
+                end_sec=float(seg.end_sec),
+                emotion=seg.emotion,
+                confidence=float(seg.confidence),
+            )
+            for seg in result.segments
+        ]
+
+        return UnrealTimelineResponse(
+            duration_sec=float(result.duration_sec),
+            segments=segments,
         )
 
 

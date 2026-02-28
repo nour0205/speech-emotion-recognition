@@ -21,7 +21,7 @@ COPY src/ src/
 COPY apps/ apps/
 COPY scripts/ scripts/
 COPY tests/ tests/
-COPY configs/ configs/
+#COPY configs/ configs/
 
 # Set PYTHONPATH to include src directory for imports
 ENV PYTHONPATH=/app:/app/src
