@@ -35,6 +35,7 @@ EMOTION_INDEX = {
 }
 
 
+
 def compute_audio_stats(
     waveform: torch.Tensor | np.ndarray,
     sample_rate: int,
@@ -318,63 +319,133 @@ def plot_timeline(
     return fig
 
 
+from matplotlib.patches import Patch
+
+def sanitize_segments(segments: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    if not segments:
+        return []
+
+    segs = sorted(
+        segments,
+        key=lambda s: (float(s.get("start_sec", 0.0)), float(s.get("end_sec", 0.0)))
+    )
+
+    cleaned = []
+    for i, s in enumerate(segs):
+        start = float(s.get("start_sec", 0.0))
+        end = float(s.get("end_sec", start))
+
+        if end < start:
+            start, end = end, start
+
+        if i < len(segs) - 1:
+            next_start = float(segs[i + 1].get("start_sec", end))
+            end = min(end, next_start)
+
+        if end > start:
+            s2 = dict(s)
+            s2["start_sec"] = start
+            s2["end_sec"] = end
+            cleaned.append(s2)
+
+    return cleaned
 def plot_segments(
     segments: list[dict[str, Any]],
     duration_sec: float,
     title: str = "Emotion Segments",
     figsize: tuple[int, int] = (14, 3),
 ) -> plt.Figure:
-    """Create horizontal bar chart showing emotion segments over time.
-    
-    Args:
-        segments: List of segment dicts with start_sec, end_sec, emotion.
-        duration_sec: Total audio duration.
-        title: Plot title.
-        figsize: Figure size.
-        
-    Returns:
-        Matplotlib figure.
-    """
+    """Clean, professional emotion timeline visualization."""
+
     fig, ax = plt.subplots(figsize=figsize)
-    
+
+    if not segments or duration_sec <= 0:
+        ax.set_title(title)
+        ax.text(0.5, 0.5, "No segments", ha="center", va="center", transform=ax.transAxes)
+        ax.set_axis_off()
+        return fig
+
+    bar_y = 0.0
+    bar_height = 0.55
+    min_label_width = max(0.6, duration_sec * 0.08)  # prevent label overlap
+ 
+
+    used_emotions = set()
+
     for seg in segments:
-        start = seg.get("start_sec", 0)
-        end = seg.get("end_sec", start)
-        emotion = seg.get("emotion", "unknown")
-        color = EMOTION_COLORS.get(emotion, EMOTION_COLORS.get(emotion.lower(), "#888888"))
-        
+        start = float(seg.get("start_sec", 0.0))
+        end = float(seg.get("end_sec", start))
+        emotion_raw = seg.get("emotion", "unknown")
+        emotion = str(emotion_raw).lower()
+        confidence = float(seg.get("confidence", 1.0))
+
+        if end < start:
+            start, end = end, start
+
+        start = max(0.0, min(start, duration_sec))
+        end = max(0.0, min(end, duration_sec))
+
+        width = end - start
+        if width <= 0:
+            continue
+
+        color = EMOTION_COLORS.get(emotion_raw, EMOTION_COLORS.get(emotion, "#888888"))
+        used_emotions.add(emotion.capitalize())
+
+        alpha = 1.0
+
         ax.barh(
-            y=0,
-            width=end - start,
+            y=bar_y,
+            width=width,
             left=start,
-            height=0.5,
+            height=bar_height,
             color=color,
-            edgecolor="black",
-            linewidth=0.5,
+            edgecolor="white",
+            linewidth=1.2,
+            alpha=alpha,
         )
-        
-        # Label if segment is wide enough
-        if end - start > duration_sec * 0.05:
-            ax.text(
-                (start + end) / 2,
-                0,
-                emotion.capitalize(),
-                ha="center",
-                va="center",
-                fontsize=9,
-                fontweight="bold",
-            )
-    
-    ax.set_xlabel("Time (s)")
-    ax.set_title(title)
+
+     
+    # Axis styling
+    ax.set_title(title, pad=12)
     ax.set_xlim(0, duration_sec)
-    ax.set_ylim(-0.5, 0.5)
+    ax.set_ylim(-0.8, 0.8)
     ax.set_yticks([])
-    ax.grid(True, axis="x", alpha=0.3)
-    
+
+    step = 1 if duration_sec <= 20 else 2
+    ax.set_xticks(np.arange(0, duration_sec + 1e-6, step))
+    ax.grid(True, axis="x", alpha=0.25, linestyle="--")
+
+    # Remove unnecessary borders
+    ax.spines["left"].set_visible(False)
+    ax.spines["right"].set_visible(False)
+    ax.spines["top"].set_visible(False)
+
+    ax.set_xlabel("Time (s)")
+
+    # Clean legend (no icons)
+    legend_items = []
+    for name in ["Angry", "Happy", "Sad", "Neutral"]:
+        if name in used_emotions:
+            legend_items.append(
+                Patch(
+                    facecolor=EMOTION_COLORS.get(name, "#888888"),
+                    edgecolor="white",
+                    label=name,
+                )
+            )
+
+    if legend_items:
+        ax.legend(
+            handles=legend_items,
+            loc="upper right",
+            frameon=False,
+            ncol=min(4, len(legend_items)),
+            bbox_to_anchor=(1.0, 1.2),
+        )
+
     plt.tight_layout()
     return fig
-
 
 def display_audio_metrics(stats: dict[str, float]) -> None:
     """Display audio metrics in Streamlit columns.

@@ -21,6 +21,8 @@ import sys
 import traceback
 from datetime import datetime
 
+from apps.streamlit_app.ui.visualization import sanitize_segments
+
 # Add apps directory to path for imports when running as script
 _apps_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if _apps_dir not in sys.path:
@@ -370,6 +372,7 @@ def render_timeline_results(results: dict, config: dict) -> None:
         st.markdown("#### Emotion Segments")
         
         # Segment bar chart
+        segments = sanitize_segments(segments)
         fig = plot_segments(segments, duration_sec)
         st.pyplot(fig, use_container_width=True)
         st.markdown("")
