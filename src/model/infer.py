@@ -21,7 +21,7 @@ from typing import Union
 
 import torch
 
-from audioio import AudioConfig, load_validate_preprocess
+from src.audioio import AudioConfig, load_validate_preprocess
 
 from .errors import InferenceError
 from .labels import map_raw_to_canonical

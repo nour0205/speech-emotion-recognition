@@ -21,7 +21,7 @@ import sys
 import traceback
 from datetime import datetime
 
-from apps.streamlit_app.ui.visualization import sanitize_segments
+from ui.visualization import sanitize_segments
 
 # Add apps directory to path for imports when running as script
 _apps_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))

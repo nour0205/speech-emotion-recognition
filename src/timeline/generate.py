@@ -29,7 +29,7 @@ from typing import Union
 
 import torch
 
-from audioio import AudioConfig, load_validate_preprocess
+from src.audioio import AudioConfig, load_validate_preprocess
 from model.infer import predict_waveform
 from model.labels import CANONICAL_LABELS
 
