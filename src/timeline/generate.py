@@ -30,8 +30,8 @@ from typing import Union
 import torch
 
 from src.audioio import AudioConfig, load_validate_preprocess
-from model.infer import predict_waveform
-from model.labels import CANONICAL_LABELS
+from src.model.infer import predict_waveform
+from src.model.labels import CANONICAL_LABELS
 
 from .merge import MergeConfig, merge_windows_to_segments
 from .schema import Segment, TimelineResult, WindowPrediction

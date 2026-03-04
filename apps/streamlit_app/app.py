@@ -73,6 +73,82 @@ st.set_page_config(
 # Setup logging for the app
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
+def inject_css() -> None:
+    """Inject custom CSS to make the UI feel more product-like and less 'template'."""
+    st.markdown(
+        """
+        <style>
+        /* Reduce Streamlit chrome */
+        #MainMenu {visibility: hidden;}
+        footer {visibility: hidden;}
+        header {visibility: hidden;}
+
+        /* Layout breathing room */
+        .block-container {padding-top: 1.25rem; padding-bottom: 2.25rem; max-width: 1200px;}
+
+        /* Sidebar: softer, more 'designed' */
+        section[data-testid="stSidebar"] {
+            background: linear-gradient(180deg, #f8fafc 0%, #ffffff 80%);
+            border-right: 1px solid rgba(15, 23, 42, 0.08);
+        }
+
+        /* Hero header */
+        .ser-hero {
+            border-radius: 22px;
+            padding: 18px 20px;
+            border: 1px solid rgba(15, 23, 42, 0.10);
+            background:
+                radial-gradient(900px circle at 0% 0%, rgba(124, 58, 237, 0.18) 0%, rgba(14, 165, 233, 0.12) 40%, rgba(255,255,255,0) 70%),
+                linear-gradient(180deg, rgba(255,255,255,0.9), rgba(255,255,255,0.95));
+            box-shadow: 0 10px 30px rgba(2, 6, 23, 0.06);
+        }
+        .ser-hero h1 {margin: 0; font-size: 34px; line-height: 1.15;}
+        .ser-hero p {margin: 6px 0 0; color: rgba(15, 23, 42, 0.70);}
+        .ser-pill {
+            display: inline-block;
+            padding: 4px 10px;
+            border-radius: 999px;
+            border: 1px solid rgba(15, 23, 42, 0.12);
+            background: rgba(255,255,255,0.75);
+            font-size: 12px;
+            margin-left: 6px;
+            white-space: nowrap;
+        }
+
+        /* Buttons */
+        div.stButton > button[kind="primary"] {
+            border-radius: 12px !important;
+            padding: 0.65rem 1rem !important;
+        }
+        </style>
+        """,
+        unsafe_allow_html=True,
+    )
+
+
+def render_hero(config: dict, audio_ready: bool) -> None:
+    """Top header that makes the app feel branded (not auto-generated)."""
+    mode = "Timeline" if config.get("mode") == "timeline" else "Single"
+    status = "Audio loaded " if audio_ready else "Waiting for audio"
+    st.markdown(
+        f"""
+        <div class="ser-hero">
+          <div style="display:flex;justify-content:space-between;gap:14px;flex-wrap:wrap;align-items:flex-start;">
+            <div>
+              <h1>EchoBloom</h1>
+              <p>Emotion detection from voice lines — {status}</p>
+            </div>
+            <div style="text-align:right;">
+              <span class="ser-pill">Model: {config.get('model_id','baseline')}</span>
+              <span class="ser-pill">Mode: {mode}</span>
+              <span class="ser-pill">Device: {str(config.get('device','cpu')).upper()}</span>
+            </div>
+          </div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+    st.markdown("")
 
 
 def init_session_state() -> None:
@@ -262,41 +338,44 @@ def run_analysis(audio_bytes: bytes, config: dict) -> dict:
 
 def render_input_section() -> bytes | None:
     """Render audio input section and return audio bytes if available."""
-    st.markdown("### 📥 Audio Input")
-    
-    tab1, tab2 = st.tabs(["📁 Upload File", "🎙️ Record Audio"])
-    
+    st.markdown("###  Audio")
+
+    source = st.radio(
+        "Input source",
+        options=["Upload WAV", "Record"],
+        horizontal=True,
+        label_visibility="collapsed",
+    )
+
     audio_bytes = None
     filename = "audio.wav"
-    
-    with tab1:
+
+    if source == "Upload WAV":
         uploaded_file = st.file_uploader(
-            "Choose a WAV file",
+            "Drop a WAV file here",
             type=["wav"],
             key="file_uploader",
-            help="Upload a WAV audio file for emotion analysis",
+            help="Best results with clean speech (mono), 16kHz+",
         )
-        
         if uploaded_file is not None:
             audio_bytes = uploaded_file.getvalue()
             filename = uploaded_file.name
             st.audio(uploaded_file, format="audio/wav")
-    
-    with tab2:
+    else:
         audio_value = st.audio_input(
-            "Click to record",
+            "Record a short clip",
             key="audio_recorder",
-            help="Record audio from your microphone",
+            help="Speak clearly; 3–10 seconds is usually enough",
         )
-        
         if audio_value is not None:
             audio_bytes = audio_value.getvalue()
             filename = "recording.wav"
-    
+
     if audio_bytes:
+        st.caption(f"Loaded: **{filename}** • {len(audio_bytes)/1024:.1f} KB")
         st.session_state["audio_bytes"] = audio_bytes
         st.session_state["audio_filename"] = filename
-    
+
     return audio_bytes
 
 
@@ -308,41 +387,54 @@ def render_results_section(report: dict) -> None:
             if report.get("error_traceback"):
                 st.code(report["error_traceback"])
         return
-    
+
     results = report.get("results", {})
     config = report.get("config", {})
     mode = config.get("mode", "single")
-    
-    # Audio stats first
-    audio_stats = report.get("audio_stats", {})
-    if audio_stats:
-        st.markdown("### 📊 Audio Metrics")
-        display_audio_metrics(audio_stats)
-        st.markdown("")
-    
-    # Waveform and Spectrogram - stacked vertically with full width
-    waveform = st.session_state.get("_waveform")
-    sample_rate = st.session_state.get("_sample_rate", 16000)
-    
-    if waveform is not None:
-        st.markdown("### 🎵 Waveform")
-        fig = plot_waveform(waveform, sample_rate)
-        st.pyplot(fig, use_container_width=True)
-        st.markdown("")
-        
-        st.markdown("### 📈 Spectrogram")
-        fig = plot_spectrogram(waveform, sample_rate)
-        st.pyplot(fig, use_container_width=True)
-        st.markdown("")
-    
-    st.markdown("---")
-    st.markdown("")
-    
-    # Results based on mode
-    if mode == "single":
-        render_single_results(results, config)
-    else:
-        render_timeline_results(results, config)
+
+    tab_sum, tab_vis, tab_det = st.tabs([" Summary", "📈 Visuals", "🧾 Details"])
+
+    with tab_sum:
+        # Audio stats (quick scan)
+        audio_stats = report.get("audio_stats", {})
+        if audio_stats:
+            display_audio_metrics(audio_stats)
+            st.markdown("")
+
+        # Main results
+        if mode == "single":
+            render_single_results(results, config)
+        else:
+            render_timeline_results(results, config)
+
+    with tab_vis:
+        waveform = st.session_state.get("_waveform")
+        sample_rate = st.session_state.get("_sample_rate", 16000)
+        if waveform is None:
+            st.info("No waveform available yet.")
+        else:
+            st.markdown("####  Waveform")
+            st.pyplot(plot_waveform(waveform, sample_rate), use_container_width=True)
+            st.markdown("####  Spectrogram")
+            st.pyplot(plot_spectrogram(waveform, sample_rate), use_container_width=True)
+
+    with tab_det:
+        if mode == "timeline":
+            segments = results.get("segments", [])
+            windows = results.get("windows", [])
+            if segments:
+                with st.expander(" Segments Table", expanded=True):
+                    display_segments_table(sanitize_segments(segments))
+            if config.get("include_windows") and windows:
+                with st.expander(" Window Predictions", expanded=False):
+                    display_windows_table(windows)
+
+        st.markdown("####  Diagnostics")
+        col1, col2 = st.columns(2)
+        with col1:
+            render_performance_section(report)
+        with col2:
+            render_logs_section(report)
 
 
 def render_single_results(results: dict, config: dict) -> None:
@@ -360,7 +452,7 @@ def render_single_results(results: dict, config: dict) -> None:
 
 def render_timeline_results(results: dict, config: dict) -> None:
     """Render timeline analysis results."""
-    st.markdown("### 🎯 Timeline Results")
+    st.markdown("###  Timeline Results")
     st.markdown("")
     
     segments = results.get("segments", [])
@@ -378,7 +470,7 @@ def render_timeline_results(results: dict, config: dict) -> None:
         st.markdown("")
         
         # Segments table
-        with st.expander("📋 Segments Table", expanded=True):
+        with st.expander(" Segments Table", expanded=True):
             display_segments_table(segments)
         st.markdown("")
     
@@ -406,13 +498,13 @@ def render_timeline_results(results: dict, config: dict) -> None:
     
     # Window predictions table
     if config.get("include_windows") and windows:
-        with st.expander("🔍 Window Predictions", expanded=False):
+        with st.expander(" Window Predictions", expanded=False):
             display_windows_table(windows)
 
 
 def render_performance_section(report: dict) -> None:
     """Render performance metrics section."""
-    with st.expander("⚡ Performance", expanded=False):
+    with st.expander(" Performance", expanded=False):
         timings = report.get("timings", {})
         if timings:
             col1, col2 = st.columns([2, 1])
@@ -429,7 +521,7 @@ def render_logs_section(report: dict) -> None:
     """Render captured logs section."""
     logs = report.get("logs", [])
     
-    with st.expander(f"📋 Logs ({len(logs)} entries)", expanded=False):
+    with st.expander(f" Logs ({len(logs)} entries)", expanded=False):
         if logs:
             for log in logs:
                 st.text(log)
@@ -439,7 +531,7 @@ def render_logs_section(report: dict) -> None:
 
 def render_export_section(report: dict) -> None:
     """Render export buttons section."""
-    st.markdown("### 📤 Export")
+    st.markdown("###  Export")
     
     col1, col2, col3 = st.columns(3)
     
@@ -447,7 +539,7 @@ def render_export_section(report: dict) -> None:
         # Export RunReport as JSON
         json_str = report_to_json(report)
         st.download_button(
-            label="📥 Download Report (JSON)",
+            label=" Download Report (JSON)",
             data=json_str,
             file_name=f"run_report_{report.get('run_id', 'unknown')[:8]}.json",
             mime="application/json",
@@ -461,13 +553,13 @@ def render_export_section(report: dict) -> None:
         if config.get("mode") == "timeline" and results.get("segments"):
             csv_str = segments_to_csv(results["segments"])
             st.download_button(
-                label="📥 Download Segments (CSV)",
+                label=" Download Segments (CSV)",
                 data=csv_str,
                 file_name=f"segments_{report.get('run_id', 'unknown')[:8]}.csv",
                 mime="text/csv",
             )
         else:
-            st.button("📥 Download Segments (CSV)", disabled=True, help="Only available in timeline mode")
+            st.button(" Download Segments (CSV)", disabled=True, help="Only available in timeline mode")
     
     with col3:
         # Copy run ID
@@ -477,31 +569,30 @@ def render_export_section(report: dict) -> None:
 def main():
     """Main application entry point."""
     init_session_state()
-    
-    # Title
-    st.title("🎤 Speech Emotion Recognition")
-    st.markdown("""
-    Analyze emotions in speech using a **Wav2Vec2** model trained on the IEMOCAP dataset.
-    Upload or record audio, configure analysis parameters, and view detailed results.
-    """)
-    
+    inject_css()
+
     # Sidebar configuration
     config = render_config_sidebar()
     st.session_state["config"] = config
+    render_hero(config, audio_ready=bool(st.session_state.get("audio_bytes")))
     
     # Full-width input section at top
     st.markdown("")
     audio_bytes = render_input_section()
-    
-    # Analysis button
+    # Actions
     if audio_bytes:
-        st.markdown("")
-        if st.button("🔍 Analyze", type="primary", use_container_width=False):
-            with st.spinner("Analyzing audio..."):
-                report = run_analysis(audio_bytes, config)
-                st.session_state["run_report"] = report
-                st.session_state["analysis_complete"] = True
-    
+        col_a, col_b = st.columns([1, 1])
+        with col_a:
+            if st.button(" Analyze", type="primary", use_container_width=True):
+                with st.spinner("Running inference…"):
+                    report = run_analysis(audio_bytes, config)
+                    st.session_state["run_report"] = report
+                    st.session_state["analysis_complete"] = True
+        with col_b:
+            if st.button(" Clear", use_container_width=True):
+                st.session_state["run_report"] = None
+                st.session_state["analysis_complete"] = False
+
     # Results section
     report = st.session_state.get("run_report")
     
@@ -511,25 +602,10 @@ def main():
         st.markdown("")
         
         render_results_section(report)
-        
-        # Performance and logs in columns
-        st.markdown("")
-        st.markdown("---")
-        st.markdown("### ⚡ Performance & Logs")
-        st.markdown("")
-        
-        col_perf, col_logs = st.columns(2)
-        
-        with col_perf:
-            render_performance_section(report)
-        
-        with col_logs:
-            render_logs_section(report)
-        
         st.markdown("")
         render_export_section(report)
     elif audio_bytes:
-        st.info("👆 Click **Analyze** to process the audio.")
+        st.info(" Click **Analyze** to process the audio.")
     
     # Footer
     st.markdown("")

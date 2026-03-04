@@ -17,14 +17,16 @@ import torch
 
 # Emotion color mapping for visualizations
 EMOTION_COLORS = {
-    "angry": "#FF4444",
-    "happy": "#44DD44",
-    "sad": "#4444FF",
-    "neutral": "#888888",
-    "Angry": "#FF4444",
-    "Happy": "#44DD44",
-    "Sad": "#4444FF",
-    "Neutral": "#888888",
+    # Softer, more distinctive palette (looks less like a default demo)
+    "angry": "#EF4444",     # red
+    "happy": "#F59E0B",     # amber
+    "sad": "#6366F1",       # indigo
+    "neutral": "#64748B",   # slate
+
+    "Angry": "#EF4444",
+    "Happy": "#F59E0B",
+    "Sad": "#6366F1",
+    "Neutral": "#64748B",
 }
 
 EMOTION_INDEX = {
@@ -124,7 +126,7 @@ def plot_waveform(
     time_axis = np.arange(len(data)) / sample_rate
     
     fig, ax = plt.subplots(figsize=figsize)
-    ax.plot(time_axis, data, linewidth=0.5, color="#1f77b4")
+    ax.plot(time_axis, data, linewidth=0.7, color="#0EA5E9")
     ax.set_xlabel("Time (s)")
     ax.set_ylabel("Amplitude")
     ax.set_title(title)
@@ -304,7 +306,7 @@ def plot_timeline(
     ax.scatter(times, indices, c=colors, s=80, edgecolors="black", linewidths=0.5)
     
     # Connect with lines
-    ax.step(times, indices, where="mid", color="#666666", alpha=0.5, linestyle="--")
+    ax.step(times, indices, where="mid", color="#334155", alpha=0.35, linestyle="--")
     
     ax.set_xlabel("Time (s)")
     ax.set_ylabel("Emotion")
