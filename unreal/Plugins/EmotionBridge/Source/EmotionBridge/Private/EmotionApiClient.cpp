@@ -8,27 +8,10 @@
 #include "Misc/FileHelper.h"
 #include "Misc/Paths.h"
 
-// ---------------------------------------------------------------------------
-// Construction
-// ---------------------------------------------------------------------------
+FEmotionApiClient::FEmotionApiClient(const FString& InBaseUrl) : BaseUrl(InBaseUrl) {}
+FEmotionApiClient::~FEmotionApiClient() {}
 
-FEmotionApiClient::FEmotionApiClient(const FString& InBaseUrl)
-	: BaseUrl(InBaseUrl)
-{
-}
-
-FEmotionApiClient::~FEmotionApiClient()
-{
-}
-
-void FEmotionApiClient::SetBaseUrl(const FString& InBaseUrl)
-{
-	BaseUrl = InBaseUrl;
-}
-
-// ---------------------------------------------------------------------------
-// Internal helpers
-// ---------------------------------------------------------------------------
+void FEmotionApiClient::SetBaseUrl(const FString& InBaseUrl) { BaseUrl = InBaseUrl; }
 
 TSharedRef<IHttpRequest, ESPMode::ThreadSafe> FEmotionApiClient::MakeRequest()
 {
@@ -41,38 +24,33 @@ TSharedRef<IHttpRequest, ESPMode::ThreadSafe> FEmotionApiClient::MakeRequest()
 
 void FEmotionApiClient::CheckHealth(FOnHealthCheckComplete Callback)
 {
-	TSharedRef<IHttpRequest, ESPMode::ThreadSafe> Request = MakeRequest();
+	auto Request = MakeRequest();
 	Request->SetURL(BaseUrl + TEXT("/health"));
 	Request->SetVerb(TEXT("GET"));
 	Request->SetTimeout(5.f);
 
 	Request->OnProcessRequestComplete().BindLambda(
-		[Callback](FHttpRequestPtr /*Req*/, FHttpResponsePtr Response, bool bConnected)
+		[Callback](FHttpRequestPtr, FHttpResponsePtr Response, bool bConnected)
 		{
-			const bool bHealthy = bConnected
-				&& Response.IsValid()
+			const bool bHealthy = bConnected && Response.IsValid()
 				&& Response->GetResponseCode() == 200;
-
-			if (!bConnected || !Response.IsValid())
+			if (!bHealthy)
 			{
 				UE_LOG(LogEmotionBridge, Warning,
-					TEXT("Health check: backend unreachable (connection failed)."));
+					TEXT("Health check failed — is the backend running?"));
 			}
 			else
 			{
-				UE_LOG(LogEmotionBridge, Log,
-					TEXT("Health check: HTTP %d"), Response->GetResponseCode());
+				UE_LOG(LogEmotionBridge, Log, TEXT("Health check OK (HTTP 200)."));
 			}
-
 			Callback.ExecuteIfBound(bHealthy);
-		}
-	);
+		});
 
 	Request->ProcessRequest();
 }
 
 // ---------------------------------------------------------------------------
-// POST /timeline  (multipart/form-data)
+// POST /timeline/unreal  (multipart/form-data)
 // ---------------------------------------------------------------------------
 
 void FEmotionApiClient::RequestTimeline(
@@ -82,59 +60,43 @@ void FEmotionApiClient::RequestTimeline(
 	const FString& PadMode,
 	const FString& SmoothingMethod,
 	int32 HysteresisMinRun,
-	bool bIncludeWindows,
-	bool bIncludeScores,
+	float MajorityWindow,
+	float EmaAlpha,
 	FOnTimelineComplete Callback)
 {
-	// ------------------------------------------------------------------
-	// 1. Read the WAV file from disk into a byte buffer.
-	// ------------------------------------------------------------------
+	// 1. Read WAV bytes.
 	TArray<uint8> FileBytes;
 	if (!FFileHelper::LoadFileToArray(FileBytes, *WavFilePath))
 	{
 		UE_LOG(LogEmotionBridge, Error,
-			TEXT("RequestTimeline: cannot read file '%s'. Does it exist?"), *WavFilePath);
-
-		FEmotionTimelineResponse ErrorResp;
-		ErrorResp.bIsValid = false;
-		ErrorResp.ErrorMessage = FString::Printf(
-			TEXT("Cannot read WAV file: %s"), *WavFilePath);
-		Callback.ExecuteIfBound(ErrorResp);
+			TEXT("RequestTimeline: cannot read '%s'"), *WavFilePath);
+		FEmotionTimelineResponse Err;
+		Err.bIsValid    = false;
+		Err.ErrorMessage = FString::Printf(TEXT("Cannot read WAV file: %s"), *WavFilePath);
+		Callback.ExecuteIfBound(Err);
 		return;
 	}
 
-	UE_LOG(LogEmotionBridge, Log,
-		TEXT("RequestTimeline: read %d bytes from '%s'"), FileBytes.Num(), *WavFilePath);
-
-	// ------------------------------------------------------------------
-	// 2. Build the multipart/form-data body manually.
-	//
-	//    UE's HTTP module does not have a built-in multipart helper, so we
-	//    construct the raw bytes ourselves according to RFC 2046 §5.1.1.
-	// ------------------------------------------------------------------
+	// 2. Build multipart/form-data body manually (RFC 2046 §5.1.1).
 	const FString Boundary = TEXT("----UnrealEmotionBridgeBoundary7MA4YWxkTrZu0gW");
-
 	TArray<uint8> Body;
-	Body.Reserve(FileBytes.Num() + 2048);
+	Body.Reserve(FileBytes.Num() + 4096);
 
-	// Helper: append a UTF-8 encoded FString into Body.
-	auto AppendStr = [&Body](const FString& Str)
+	auto AppendStr = [&Body](const FString& S)
 	{
-		FTCHARToUTF8 Utf8(*Str);
-		Body.Append(reinterpret_cast<const uint8*>(Utf8.Get()), Utf8.Length());
+		FTCHARToUTF8 U(*S);
+		Body.Append(reinterpret_cast<const uint8*>(U.Get()), U.Length());
 	};
-
-	// Helper: append a named text field part.
-	auto AddTextField = [&](const FString& FieldName, const FString& FieldValue)
+	auto AddTextField = [&](const FString& Name, const FString& Value)
 	{
 		AppendStr(FString::Printf(TEXT("--%s\r\n"), *Boundary));
 		AppendStr(FString::Printf(
-			TEXT("Content-Disposition: form-data; name=\"%s\"\r\n\r\n"), *FieldName));
-		AppendStr(FieldValue);
+			TEXT("Content-Disposition: form-data; name=\"%s\"\r\n\r\n"), *Name));
+		AppendStr(Value);
 		AppendStr(TEXT("\r\n"));
 	};
 
-	// --- File part ---
+	// File part.
 	const FString FileName = FPaths::GetCleanFilename(WavFilePath);
 	AppendStr(FString::Printf(TEXT("--%s\r\n"), *Boundary));
 	AppendStr(FString::Printf(
@@ -143,148 +105,134 @@ void FEmotionApiClient::RequestTimeline(
 	Body.Append(FileBytes);
 	AppendStr(TEXT("\r\n"));
 
-	// --- Optional text fields ---
+	// Timeline parameter fields.
 	AddTextField(TEXT("window_sec"),         FString::Printf(TEXT("%.4f"), WindowSec));
 	AddTextField(TEXT("hop_sec"),            FString::Printf(TEXT("%.4f"), HopSec));
 	AddTextField(TEXT("pad_mode"),           PadMode);
 	AddTextField(TEXT("smoothing_method"),   SmoothingMethod);
 	AddTextField(TEXT("hysteresis_min_run"), FString::FromInt(HysteresisMinRun));
-	AddTextField(TEXT("include_windows"),    bIncludeWindows ? TEXT("true") : TEXT("false"));
-	AddTextField(TEXT("include_scores"),     bIncludeScores  ? TEXT("true") : TEXT("false"));
+	AddTextField(TEXT("majority_window"),    FString::FromInt(static_cast<int32>(MajorityWindow)));
+	AddTextField(TEXT("ema_alpha"),          FString::Printf(TEXT("%.4f"), EmaAlpha));
 
-	// --- Closing boundary ---
 	AppendStr(FString::Printf(TEXT("--%s--\r\n"), *Boundary));
 
-	// ------------------------------------------------------------------
-	// 3. Create and dispatch the HTTP request.
-	// ------------------------------------------------------------------
-	TSharedRef<IHttpRequest, ESPMode::ThreadSafe> Request = MakeRequest();
-	Request->SetURL(BaseUrl + TEXT("/timeline"));
+	// 3. Send request to the Unreal-specific endpoint.
+	auto Request = MakeRequest();
+	Request->SetURL(BaseUrl + TEXT("/timeline/unreal"));
 	Request->SetVerb(TEXT("POST"));
-	Request->SetHeader(
-		TEXT("Content-Type"),
+	Request->SetHeader(TEXT("Content-Type"),
 		FString::Printf(TEXT("multipart/form-data; boundary=%s"), *Boundary));
-	// 180 s timeout — the first request may trigger a model download (~30–120 s).
-	Request->SetTimeout(180.f);
+	Request->SetTimeout(180.f); // model download can take ~2 min on first run
 	Request->SetContent(Body);
 
 	Request->OnProcessRequestComplete().BindLambda(
-		[Callback, WavFilePath](FHttpRequestPtr /*Req*/, FHttpResponsePtr Response, bool bConnected)
+		[Callback, WavFilePath](FHttpRequestPtr, FHttpResponsePtr Response, bool bConnected)
 		{
 			FEmotionTimelineResponse Result;
 
-			// --- Connection-level failure ---
 			if (!bConnected || !Response.IsValid())
 			{
 				UE_LOG(LogEmotionBridge, Error,
-					TEXT("/timeline: connection failed. Is the backend running?"));
+					TEXT("/timeline/unreal: connection failed. Is the backend running?"));
 				Result.bIsValid    = false;
 				Result.ErrorMessage = TEXT(
-					"HTTP connection failed. Is the backend running at the configured URL?\n"
-					"Start it with: cd speech-emotion-recognition && docker compose up api");
+					"HTTP connection failed. Start the backend:\n"
+					"  docker compose up api\nor\n"
+					"  uvicorn src.api.main:app --port 8000");
 				Callback.ExecuteIfBound(Result);
 				return;
 			}
 
-			const int32 HttpCode = Response->GetResponseCode();
+			const int32 Code     = Response->GetResponseCode();
 			const FString BodyStr = Response->GetContentAsString();
-			UE_LOG(LogEmotionBridge, Log, TEXT("/timeline: HTTP %d"), HttpCode);
+			UE_LOG(LogEmotionBridge, Log, TEXT("/timeline/unreal HTTP %d"), Code);
 
-			// --- HTTP-level error (4xx / 5xx) ---
-			if (HttpCode != 200)
+			if (Code != 200)
 			{
 				UE_LOG(LogEmotionBridge, Error,
-					TEXT("/timeline error body: %s"), *BodyStr);
+					TEXT("/timeline/unreal error body: %s"), *BodyStr);
 				Result.bIsValid = false;
 
-				// Try to extract the structured error message from the JSON body.
-				TSharedPtr<FJsonObject> ErrorJson;
-				TSharedRef<TJsonReader<>> Reader = TJsonReaderFactory<>::Create(BodyStr);
-				if (FJsonSerializer::Deserialize(Reader, ErrorJson) && ErrorJson.IsValid())
+				// Try to extract structured backend error message.
+				TSharedPtr<FJsonObject> ErrJson;
+				auto Reader = TJsonReaderFactory<>::Create(BodyStr);
+				if (FJsonSerializer::Deserialize(Reader, ErrJson) && ErrJson.IsValid())
 				{
-					const TSharedPtr<FJsonObject>* ErrorObj = nullptr;
-					if (ErrorJson->TryGetObjectField(TEXT("error"), ErrorObj))
+					const TSharedPtr<FJsonObject>* ErrObj;
+					if (ErrJson->TryGetObjectField(TEXT("error"), ErrObj))
 					{
 						FString Msg;
-						if ((*ErrorObj)->TryGetStringField(TEXT("message"), Msg))
+						if ((*ErrObj)->TryGetStringField(TEXT("message"), Msg))
 						{
 							Result.ErrorMessage = FString::Printf(
-								TEXT("Backend error (HTTP %d): %s"), HttpCode, *Msg);
+								TEXT("Backend (HTTP %d): %s"), Code, *Msg);
 							Callback.ExecuteIfBound(Result);
 							return;
 						}
 					}
 				}
-
 				Result.ErrorMessage = FString::Printf(
-					TEXT("HTTP %d from backend. Body: %s"), HttpCode, *BodyStr.Left(256));
+					TEXT("HTTP %d. Body: %s"), Code, *BodyStr.Left(200));
 				Callback.ExecuteIfBound(Result);
 				return;
 			}
 
-			// --- Parse the success JSON ---
-			bool bParsed = false;
-			Result = FEmotionApiClient::ParseTimelineResponse(BodyStr, bParsed);
-			if (!bParsed)
+			bool bOk = false;
+			Result = ParseTimelineResponse(BodyStr, bOk);
+			if (!bOk)
 			{
 				UE_LOG(LogEmotionBridge, Error,
-					TEXT("/timeline: JSON parse failed. Raw body (first 512): %s"),
+					TEXT("JSON parse failed. Raw (first 512 chars): %s"),
 					*BodyStr.Left(512));
 			}
 			Callback.ExecuteIfBound(Result);
-		}
-	);
+		});
 
 	UE_LOG(LogEmotionBridge, Log,
-		TEXT("Dispatching /timeline request (window=%.2f hop=%.2f pad=%s smooth=%s) for: %s"),
-		WindowSec, HopSec, *PadMode, *SmoothingMethod, *WavFilePath);
+		TEXT("POST /timeline/unreal  file=%s  window=%.2f  hop=%.2f  pad=%s  smooth=%s"),
+		*WavFilePath, WindowSec, HopSec, *PadMode, *SmoothingMethod);
 
 	Request->ProcessRequest();
 }
 
 // ---------------------------------------------------------------------------
-// JSON parsing
+// JSON parsing for /timeline/unreal response
 // ---------------------------------------------------------------------------
 
 FEmotionTimelineResponse FEmotionApiClient::ParseTimelineResponse(
 	const FString& JsonString, bool& bOutSuccess)
 {
-	FEmotionTimelineResponse Response;
+	FEmotionTimelineResponse R;
 	bOutSuccess = false;
 
 	TSharedPtr<FJsonObject> Root;
-	TSharedRef<TJsonReader<>> Reader = TJsonReaderFactory<>::Create(JsonString);
-
+	auto Reader = TJsonReaderFactory<>::Create(JsonString);
 	if (!FJsonSerializer::Deserialize(Reader, Root) || !Root.IsValid())
 	{
-		Response.bIsValid    = false;
-		Response.ErrorMessage = TEXT("Response body is not valid JSON.");
-		return Response;
+		R.bIsValid    = false;
+		R.ErrorMessage = TEXT("Response is not valid JSON.");
+		return R;
 	}
 
-	// Top-level scalar fields — use double for all numeric reads (UE5 JSON API).
-	Root->TryGetStringField(TEXT("model_name"), Response.ModelName);
+	// Envelope fields.
+	Root->TryGetStringField(TEXT("type"),    R.Type);
+	Root->TryGetStringField(TEXT("source"),  R.Source);
+	Root->TryGetStringField(TEXT("version"), R.Version);
 
 	double Tmp = 0.0;
-	if (Root->TryGetNumberField(TEXT("sample_rate"), Tmp))
-		Response.SampleRate = static_cast<int32>(FMath::RoundToInt(Tmp));
 	if (Root->TryGetNumberField(TEXT("duration_sec"), Tmp))
-		Response.DurationSec = static_cast<float>(Tmp);
-	if (Root->TryGetNumberField(TEXT("window_sec"), Tmp))
-		Response.WindowSec = static_cast<float>(Tmp);
-	if (Root->TryGetNumberField(TEXT("hop_sec"), Tmp))
-		Response.HopSec = static_cast<float>(Tmp);
+		R.DurationSec = static_cast<float>(Tmp);
 
-	// Segments array
-	const TArray<TSharedPtr<FJsonValue>>* SegmentsArray = nullptr;
-	if (!Root->TryGetArrayField(TEXT("segments"), SegmentsArray) || !SegmentsArray)
+	// Segments array.
+	const TArray<TSharedPtr<FJsonValue>>* SegsArr = nullptr;
+	if (!Root->TryGetArrayField(TEXT("segments"), SegsArr) || !SegsArr)
 	{
-		Response.bIsValid    = false;
-		Response.ErrorMessage = TEXT("Response JSON is missing the 'segments' array.");
-		return Response;
+		R.bIsValid    = false;
+		R.ErrorMessage = TEXT("Response is missing the 'segments' array.");
+		return R;
 	}
 
-	for (const TSharedPtr<FJsonValue>& SegVal : *SegmentsArray)
+	for (const auto& SegVal : *SegsArr)
 	{
 		const TSharedPtr<FJsonObject>* SegObj = nullptr;
 		if (!SegVal.IsValid() || !SegVal->TryGetObject(SegObj) || !SegObj)
@@ -296,14 +244,14 @@ FEmotionTimelineResponse FEmotionApiClient::ParseTimelineResponse(
 		if ((*SegObj)->TryGetNumberField(TEXT("end_sec"),    D)) Seg.EndSec     = static_cast<float>(D);
 		if ((*SegObj)->TryGetNumberField(TEXT("confidence"), D)) Seg.Confidence = static_cast<float>(D);
 		(*SegObj)->TryGetStringField(TEXT("emotion"), Seg.Emotion);
-		Response.Segments.Add(Seg);
+		R.Segments.Add(Seg);
 	}
 
 	UE_LOG(LogEmotionBridge, Log,
-		TEXT("Parsed /timeline response: model=%s duration=%.2fs segments=%d"),
-		*Response.ModelName, Response.DurationSec, Response.Segments.Num());
+		TEXT("Parsed /timeline/unreal: type=%s source=%s duration=%.2f segments=%d"),
+		*R.Type, *R.Source, R.DurationSec, R.Segments.Num());
 
-	Response.bIsValid = true;
-	bOutSuccess       = true;
-	return Response;
+	R.bIsValid = true;
+	bOutSuccess = true;
+	return R;
 }

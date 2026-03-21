@@ -5,23 +5,23 @@
 #include "EmotionTimelineTypes.generated.h"
 
 /**
- * One contiguous segment of a detected emotion returned by the /timeline endpoint.
- * Maps directly to a single object in the "segments" JSON array.
+ * One contiguous segment of a detected emotion.
+ * Matches the UnrealSegmentSchema returned by POST /timeline/unreal.
  */
 USTRUCT(BlueprintType)
 struct EMOTIONBRIDGE_API FEmotionSegment
 {
 	GENERATED_BODY()
 
-	/** Start time of this segment in seconds from the beginning of the audio. */
+	/** Start time in seconds from the beginning of the audio. */
 	UPROPERTY(BlueprintReadOnly, Category="EmotionBridge")
 	float StartSec = 0.f;
 
-	/** End time of this segment in seconds. */
+	/** End time in seconds. */
 	UPROPERTY(BlueprintReadOnly, Category="EmotionBridge")
 	float EndSec = 0.f;
 
-	/** Emotion label, e.g. "angry", "happy", "sad", "neutral". */
+	/** Emotion label: "angry", "happy", "sad", or "neutral". */
 	UPROPERTY(BlueprintReadOnly, Category="EmotionBridge")
 	FString Emotion;
 
@@ -31,33 +31,41 @@ struct EMOTIONBRIDGE_API FEmotionSegment
 };
 
 /**
- * Full response from the /timeline endpoint.
- * bIsValid is false if parsing failed or the request failed; check ErrorMessage in that case.
+ * Parsed response from POST /timeline/unreal.
+ *
+ * Envelope:
+ *   { "type": "timeline", "source": "ser_api", "version": "1.0",
+ *     "duration_sec": 10.5, "segments": [ {...}, ... ] }
+ *
+ * bIsValid is false when the request failed or JSON was malformed;
+ * inspect ErrorMessage for a human-readable reason.
  */
 USTRUCT(BlueprintType)
 struct EMOTIONBRIDGE_API FEmotionTimelineResponse
 {
 	GENERATED_BODY()
 
+	/** Always "timeline" when valid. */
 	UPROPERTY(BlueprintReadOnly, Category="EmotionBridge")
-	FString ModelName;
+	FString Type;
 
+	/** Always "ser_api" when valid. */
 	UPROPERTY(BlueprintReadOnly, Category="EmotionBridge")
-	int32 SampleRate = 0;
+	FString Source;
 
+	/** Schema version string, e.g. "1.0". */
+	UPROPERTY(BlueprintReadOnly, Category="EmotionBridge")
+	FString Version;
+
+	/** Total audio duration in seconds. */
 	UPROPERTY(BlueprintReadOnly, Category="EmotionBridge")
 	float DurationSec = 0.f;
 
-	UPROPERTY(BlueprintReadOnly, Category="EmotionBridge")
-	float WindowSec = 2.0f;
-
-	UPROPERTY(BlueprintReadOnly, Category="EmotionBridge")
-	float HopSec = 0.5f;
-
+	/** All detected emotion segments in chronological order. */
 	UPROPERTY(BlueprintReadOnly, Category="EmotionBridge")
 	TArray<FEmotionSegment> Segments;
 
-	/** True when the HTTP request succeeded and JSON was parsed without errors. */
+	/** True when the HTTP request succeeded and JSON parsed cleanly. */
 	bool bIsValid = false;
 
 	/** Human-readable error description when bIsValid == false. */

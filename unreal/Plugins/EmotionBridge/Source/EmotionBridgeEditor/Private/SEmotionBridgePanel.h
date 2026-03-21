@@ -6,19 +6,20 @@
 #include "Widgets/SCompoundWidget.h"
 #include "EmotionApiClient.h"
 #include "EmotionTimelineTypes.h"
-#include "Containers/Ticker.h"
+#include "HAL/PlatformProcess.h"
+
+// AudioCapture is used for microphone recording.
+#include "AudioCapture.h"
 
 class AEmotionLampActor;
 
 // ---------------------------------------------------------------------------
-// Helper struct: one row in the segment list view.
+// Row data for the segment list view
 // ---------------------------------------------------------------------------
 struct FEmotionSegmentRow
 {
 	FEmotionSegment Segment;
-
-	explicit FEmotionSegmentRow(const FEmotionSegment& InSeg)
-		: Segment(InSeg) {}
+	explicit FEmotionSegmentRow(const FEmotionSegment& S) : Segment(S) {}
 };
 
 // ---------------------------------------------------------------------------
@@ -26,19 +27,23 @@ struct FEmotionSegmentRow
 // ---------------------------------------------------------------------------
 
 /**
- * Main editor panel for the Emotion Bridge tab.
+ * Main Slate panel for the "Emotion Bridge" editor tab.
  *
- * Layout (top to bottom):
- *   [Header]
- *   [Backend section]  — API URL + Health Check + status indicator
- *   [File section]     — WAV path + Browse
- *   [Parameters]       — window_sec, hop_sec, pad_mode, smoothing, min_run, flags
- *   [Analyze button]
- *   [Results section]  — metadata + segment list
- *   [Playback section] — Play Demo + Stop Demo
+ * PLAYBACK:
+ *   Driven by SWidget::Tick (overriding GetCanTick → true).
+ *   Elapsed time is accumulated via InDeltaTime — no wall-clock race conditions.
+ *   Audio (the WAV file) is played via a platform subprocess (afplay / PowerShell)
+ *   launched simultaneously with the playback timer.
  *
- * Playback is driven by FTSTicker so it continues even when the panel is
- * occluded. The ticker is removed when playback stops or the panel is destroyed.
+ * RECORDING:
+ *   Uses Audio::FAudioCapture. Click "Record" to capture from the default
+ *   microphone; click "Stop Recording" to write a 16-bit mono WAV to a temp
+ *   file and auto-populate the WAV path field.
+ *
+ * ACTOR INTERACTION:
+ *   FindOrSpawnLampActor() searches the editor world first, then the PIE world.
+ *   The lamp's OnConstruction() creates a DynamicMaterial so color changes are
+ *   visible without PIE.
  */
 class SEmotionBridgePanel : public SCompoundWidget
 {
@@ -49,58 +54,73 @@ public:
 	void Construct(const FArguments& InArgs);
 	virtual ~SEmotionBridgePanel() override;
 
+	// Slate tick — drives playback; called every frame when the tab is visible.
+	// bCanTick is set to true in Construct(); GetCanTick() is non-virtual in UE5.7.
+	virtual void Tick(const FGeometry& AllottedGeometry,
+		const double InCurrentTime, const float InDeltaTime) override;
+
 private:
 	// -----------------------------------------------------------------------
-	// State
+	// Core state
 	// -----------------------------------------------------------------------
-
-	/** HTTP client. Owned for the lifetime of the panel. */
 	TUniquePtr<FEmotionApiClient> ApiClient;
+	FEmotionTimelineResponse      CurrentTimeline;
+	bool                          bIsAnalyzing = false;
 
-	/** Latest successful timeline response. */
-	FEmotionTimelineResponse CurrentTimeline;
-
-	/** True while waiting for the HTTP response. */
-	bool bIsAnalyzing = false;
-
-	// --- Playback state ---
-	bool   bIsPlaying             = false;
-	double PlaybackStartWallTime  = 0.0;  // FPlatformTime::Seconds() at start
-	int32  LastActiveSegmentIndex = -1;
+	// -----------------------------------------------------------------------
+	// Playback state
+	// -----------------------------------------------------------------------
+	bool         bIsPlaying             = false;
+	double       PlaybackElapsedSec     = 0.0;
+	int32        LastActiveSegmentIndex = -1;
+	FLinearColor CurrentDisplayColor    = FLinearColor::White; // in-panel color swatch
 	TWeakObjectPtr<AEmotionLampActor> LampActorRef;
-	FTSTicker::FDelegateHandle PlaybackTickerHandle;
+	FProcHandle  AudioPlayerHandle; // platform audio process (afplay / PowerShell)
 
-	// --- Parameter state ---
+	// -----------------------------------------------------------------------
+	// Recording state
+	// -----------------------------------------------------------------------
+	bool   bIsRecording      = false;
+	double RecordingElapsedSec = 0.0;
+	TArray<float> RecordedSamples;  // protected by RecordingLock
+	FCriticalSection RecordingLock;
+	int32  CapturedSampleRate  = 16000;
+	int32  CapturedNumChannels = 1;
+	TUniquePtr<Audio::FAudioCapture> AudioCapture;
+
+	// -----------------------------------------------------------------------
+	// Parameter state
+	// -----------------------------------------------------------------------
 	FString WavFilePath;
-	float   WindowSec         = 2.0f;
-	float   HopSec            = 0.5f;
-	FString PadMode           = TEXT("zero");
-	FString SmoothingMethod   = TEXT("hysteresis");
-	int32   HysteresisMinRun  = 3;
-	bool    bIncludeWindows   = false;
-	bool    bIncludeScores    = false;
+	float   WindowSec        = 2.0f;
+	float   HopSec           = 0.5f;
+	FString PadMode          = TEXT("none");
+	FString SmoothingMethod  = TEXT("none");
+	int32   HysteresisMinRun = 3;
+	int32   MajorityWindow   = 5;
+	float   EmaAlpha         = 0.6f;
 
-	// --- Combo box options ---
+	// Combo-box option lists
 	TArray<TSharedPtr<FString>> PadModeOptions;
 	TSharedPtr<FString>         SelectedPadMode;
 	TArray<TSharedPtr<FString>> SmoothingOptions;
 	TSharedPtr<FString>         SelectedSmoothingMethod;
 
-	// --- Segment list ---
+	// Segment list
 	TArray<TSharedPtr<FEmotionSegmentRow>> SegmentRows;
 
 	// -----------------------------------------------------------------------
-	// Widget references (for programmatic updates)
+	// Widget references
 	// -----------------------------------------------------------------------
-	TSharedPtr<SEditableTextBox> ApiUrlBox;
-	TSharedPtr<SEditableTextBox> WavPathBox;
-	TSharedPtr<STextBlock>       StatusText;
-	TSharedPtr<SBorder>          StatusBorder;
-	TSharedPtr<STextBlock>       MetadataText;
+	TSharedPtr<SEditableTextBox>   ApiUrlBox;
+	TSharedPtr<SEditableTextBox>   WavPathBox;
+	TSharedPtr<STextBlock>         StatusText;
+	TSharedPtr<STextBlock>         MetadataText;
+	TSharedPtr<STextBlock>         EmotionLabelDisplay; // large emotion name in color swatch
 	TSharedPtr<SListView<TSharedPtr<FEmotionSegmentRow>>> SegmentListView;
 
 	// -----------------------------------------------------------------------
-	// UI builders (called from Construct)
+	// UI builders
 	// -----------------------------------------------------------------------
 	TSharedRef<SWidget> BuildBackendSection();
 	TSharedRef<SWidget> BuildFileSection();
@@ -113,49 +133,43 @@ private:
 	// -----------------------------------------------------------------------
 	FReply OnHealthCheck();
 	FReply OnBrowseWav();
+	FReply OnRecordStart();
+	FReply OnRecordStop();
 	FReply OnAnalyze();
 	FReply OnPlayDemo();
 	FReply OnStopDemo();
+	FReply OnFocusViewport();
 
 	// -----------------------------------------------------------------------
-	// Internal helpers
+	// Internal
 	// -----------------------------------------------------------------------
-
-	/** Called on the game thread when the HTTP response arrives. */
 	void OnTimelineReceived(const FEmotionTimelineResponse& Response);
-
-	/** Called on the game thread when the health check completes. */
 	void OnHealthCheckResult(bool bHealthy);
+	void SetStatus(const FString& Message, FLinearColor Color = FLinearColor::White);
 
-	/** Update the status bar text and color. */
-	void SetStatus(const FString& Message, FLinearColor Color);
-
-	/**
-	 * Find an existing AEmotionLampActor in the editor world or spawn a new one.
-	 * Returns nullptr if GEditor is unavailable.
-	 */
 	AEmotionLampActor* FindOrSpawnLampActor();
 
-	/** FTSTicker callback; returns true to keep ticking, false to stop. */
-	bool OnPlaybackTick(float DeltaTime);
+	/**
+	 * Apply the given emotion to ALL targets in the editor world:
+	 *  1. Every actor that has a UEmotionColorComponent.
+	 *  2. The AEmotionLampActor reference (if still valid).
+	 * Call this instead of LampActorRef->ApplyEmotion() directly.
+	 */
+	void BroadcastEmotion(const FString& Emotion, float Confidence);
 
-	/** Populate SegmentRows from CurrentTimeline and refresh the list view. */
+	/** Launch a platform-native audio player for WavFilePath (fire-and-forget). */
+	void LaunchAudioPlayer();
+
+	/** Stop the audio player process if still running. */
+	void StopAudioPlayer();
+
+	/** Write the captured float samples to a 16-bit mono WAV file. Returns path on success. */
+	FString WriteRecordingToWav();
+
 	void RefreshSegmentList();
-
-	/** Generate a single row widget for the segment list view. */
 	TSharedRef<ITableRow> GenerateSegmentRow(
 		TSharedPtr<FEmotionSegmentRow> Item,
 		const TSharedRef<STableViewBase>& OwnerTable);
 
-	/** Return a Slate color for the given emotion label (reads Settings). */
 	FSlateColor GetSlateColorForEmotion(const FString& Emotion) const;
-
-	/** Highlight the currently active row during playback. */
-	FSlateColor GetRowColor(TSharedPtr<FEmotionSegmentRow> Row) const;
-
-	/** Column identifiers for the segment list view. */
-	static const FName ColStart;
-	static const FName ColEnd;
-	static const FName ColEmotion;
-	static const FName ColConfidence;
 };

@@ -5,19 +5,24 @@
 #include "EmotionTimelineTypes.h"
 #include "Http.h"
 
-/** Called on the game thread when the /timeline request completes (success or failure). */
+/** Called on the game thread when the /timeline/unreal request completes. */
 DECLARE_DELEGATE_OneParam(FOnTimelineComplete, const FEmotionTimelineResponse& /*Response*/);
 
 /** Called on the game thread when the /health check completes. */
 DECLARE_DELEGATE_OneParam(FOnHealthCheckComplete, bool /*bIsHealthy*/);
 
 /**
- * Thin HTTP client that wraps the two relevant endpoints of the speech-emotion-recognition backend:
- *   GET  /health
- *   POST /timeline   (multipart/form-data)
+ * HTTP client for the speech-emotion-recognition backend.
+ *
+ * Endpoints used:
+ *   GET  /health                — liveness check (5 s timeout)
+ *   POST /timeline/unreal       — Unreal-specific timeline contract (180 s timeout)
+ *
+ * The /timeline/unreal endpoint returns a simplified JSON envelope:
+ *   { "type": "timeline", "source": "ser_api", "version": "1.0",
+ *     "duration_sec": N, "segments": [ { start_sec, end_sec, emotion, confidence } ] }
  *
  * All callbacks are delivered on the game thread (UE HTTP module guarantee).
- * Create one instance per panel/component; call SetBaseUrl to switch endpoints at runtime.
  */
 class EMOTIONBRIDGE_API FEmotionApiClient
 {
@@ -25,18 +30,16 @@ public:
 	explicit FEmotionApiClient(const FString& InBaseUrl);
 	~FEmotionApiClient();
 
-	/** Update the backend base URL without recreating the client. */
+	/** Update the base URL without recreating the client. */
 	void SetBaseUrl(const FString& InBaseUrl);
 
 	/**
-	 * POST /timeline with the WAV file as multipart/form-data plus optional parameters.
-	 * Reads the file from disk synchronously before dispatching the async HTTP request.
+	 * POST /timeline/unreal with the WAV file as multipart/form-data.
 	 *
-	 * @param WavFilePath   Absolute path to the WAV file.
-	 * @param Callback      Invoked on game thread with the parsed response (or an error response).
+	 * Reads the file from disk synchronously before dispatching the async request.
+	 * Timeout is 180 s to accommodate first-run model downloads (~30–120 s).
 	 *
-	 * NOTE: The first call may take 30–120 s if the model has not been downloaded yet.
-	 *       The HTTP timeout is set to 180 s to accommodate this.
+	 * Optional smoothing parameters default to backend settings when omitted.
 	 */
 	void RequestTimeline(
 		const FString& WavFilePath,
@@ -45,23 +48,17 @@ public:
 		const FString& PadMode,
 		const FString& SmoothingMethod,
 		int32 HysteresisMinRun,
-		bool bIncludeWindows,
-		bool bIncludeScores,
+		float MajorityWindow,
+		float EmaAlpha,
 		FOnTimelineComplete Callback
 	);
 
-	/**
-	 * GET /health — lightweight liveness check.
-	 * Times out after 5 s.
-	 */
+	/** GET /health — lightweight liveness check, 5 s timeout. */
 	void CheckHealth(FOnHealthCheckComplete Callback);
 
 private:
 	FString BaseUrl;
 
-	/** Build an IHttpRequest with the module's default settings. */
 	static TSharedRef<IHttpRequest, ESPMode::ThreadSafe> MakeRequest();
-
-	/** Deserialize the /timeline JSON body into FEmotionTimelineResponse. */
 	static FEmotionTimelineResponse ParseTimelineResponse(const FString& JsonString, bool& bOutSuccess);
 };

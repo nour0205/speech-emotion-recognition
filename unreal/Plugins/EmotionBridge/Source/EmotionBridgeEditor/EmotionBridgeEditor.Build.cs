@@ -28,6 +28,9 @@ public class EmotionBridgeEditor : ModuleRules
 			"DesktopPlatform",
 			"EditorStyle",
 			"ApplicationCore",    // FSlateApplication
+			"AudioCaptureCore",   // Audio::FAudioCapture implementation
+			"AudioCapture",       // Audio::FAudioCapture — microphone recording
+			"EditorFramework",    // FLevelEditorViewportClient (viewport focus)
 		});
 
 		PrivateIncludePaths.AddRange(new string[]

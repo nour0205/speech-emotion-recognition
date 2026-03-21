@@ -12,12 +12,21 @@ class UMaterialInstanceDynamic;
 /**
  * AEmotionLampActor
  *
- * A simple demonstration actor consisting of a cube mesh and a point light.
- * Call ApplyEmotion() to change the light color (and mesh tint if the material
- * exposes a "BaseColor" vector parameter) according to the EmotionBridgeSettings color map.
+ * A glowing sphere + point light driven by emotion color.
+ * Works in both the editor world (panel preview) and PIE/packaged builds.
  *
- * Place this actor in your editor world. The Emotion Bridge panel will find it
- * automatically via TActorIterator, or spawn a new one if none exists.
+ * Visual strategy:
+ *  - UPointLightComponent placed INSIDE the sphere illuminates the scene.
+ *  - A UMaterialInstanceDynamic tints the sphere mesh itself.
+ *    The "Color" / "BaseColor" parameter is set to an HDR value (> 1.0)
+ *    so that UE5 Bloom creates a visible glow on the mesh surface.
+ *  - Both are updated simultaneously by ApplyEmotion().
+ *
+ * OnConstruction() is overridden so the dynamic material is ready in the
+ * editor world (BeginPlay is NOT called there).
+ *
+ * For the richest result, assign a material with an EmissiveColor or
+ * BaseColor vector parameter to the sphere mesh. See MANUAL_ASSET_SETUP.md.
  */
 UCLASS(BlueprintType, Blueprintable, meta=(DisplayName="Emotion Lamp Actor"))
 class EMOTIONBRIDGE_API AEmotionLampActor : public AActor
@@ -28,18 +37,17 @@ public:
 	AEmotionLampActor();
 
 	/**
-	 * Apply a visual color representing the given emotion.
-	 * Drives both the point light color and, if available, a "BaseColor" vector
-	 * parameter on the first material slot.
-	 * Unknown emotion labels fall back to neutral (white) and log a warning.
+	 * Apply color for the given emotion to both the point light and mesh material.
+	 * Unknown labels fall back to neutral white and log a warning.
+	 * Safe to call in the editor world and during PIE.
 	 *
-	 * @param Emotion     Lowercase emotion string, e.g. "happy".
-	 * @param Confidence  Value in [0,1] used to scale light intensity.
+	 * @param Emotion    Lowercase emotion label ("angry","happy","sad","neutral").
+	 * @param Confidence [0,1] — scales light intensity.
 	 */
 	UFUNCTION(BlueprintCallable, Category="EmotionBridge")
 	void ApplyEmotion(const FString& Emotion, float Confidence = 1.0f);
 
-	/** Reset to a neutral white state. Equivalent to ApplyEmotion("neutral", 1.0). */
+	/** Reset to neutral white. Equivalent to ApplyEmotion("neutral", 1.0). */
 	UFUNCTION(BlueprintCallable, Category="EmotionBridge")
 	void ResetToNeutral();
 
@@ -50,9 +58,14 @@ public:
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category="Components")
 	TObjectPtr<USceneComponent> RootSceneComponent;
 
+	/** Sphere mesh — represents the glowing bulb. */
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category="Components")
 	TObjectPtr<UStaticMeshComponent> MeshComponent;
 
+	/**
+	 * Point light placed at the center of the sphere.
+	 * Placing it INSIDE the mesh makes it appear as if the sphere itself emits light.
+	 */
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category="Components")
 	TObjectPtr<UPointLightComponent> PointLightComponent;
 
@@ -60,19 +73,34 @@ public:
 	// Tunables
 	// -----------------------------------------------------------------------
 
-	/** Maximum point light intensity (lumens). Scaled down at lower confidence values. */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="EmotionBridge", meta=(ClampMin="0.0"))
-	float LightIntensityBase = 3000.f;
+	/** Maximum point light intensity in lumens. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="EmotionBridge", meta=(ClampMin="0"))
+	float LightIntensityBase = 5000.f;
 
-	/** Minimum fraction of LightIntensityBase applied at zero confidence. */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="EmotionBridge", meta=(ClampMin="0.0", ClampMax="1.0"))
-	float LightIntensityMinFraction = 0.3f;
+	/** Minimum intensity fraction at zero confidence. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="EmotionBridge",
+		meta=(ClampMin="0", ClampMax="1"))
+	float LightIntensityMinFraction = 0.2f;
+
+	/**
+	 * HDR multiplier for the mesh material color parameter.
+	 * Values > 1.0 create emissive bloom when post-processing is enabled.
+	 * Default 4.0 produces strong bloom with the default Lumen/post-process settings.
+	 */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="EmotionBridge", meta=(ClampMin="1"))
+	float MeshColorHDRMultiplier = 4.0f;
 
 protected:
+	/** Called in BOTH editor and PIE — used to initialise the dynamic material. */
+	virtual void OnConstruction(const FTransform& Transform) override;
+
 	virtual void BeginPlay() override;
 
 private:
-	/** Dynamic material instance created at BeginPlay to allow mesh tinting without asset changes. */
+	/** Dynamic material instance for mesh color/emissive tinting. */
 	UPROPERTY()
 	TObjectPtr<UMaterialInstanceDynamic> DynamicMaterial;
+
+	/** Creates DynamicMaterial from the mesh's slot 0 if not already done. */
+	void EnsureDynamicMaterial();
 };
