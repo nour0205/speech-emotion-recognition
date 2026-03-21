@@ -23,3 +23,14 @@ Thumbs.db
 docs/REPORT.pdf
 docs/diagrams/
 docs/_cache/
+
+# Unreal Engine generated artifacts
+unreal/Intermediate/
+unreal/Binaries/
+unreal/DerivedDataCache/
+unreal/Saved/
+unreal/Build/
+unreal/**/Intermediate/
+unreal/**/Binaries/
+unreal/EmotionDemo (Mac).xcworkspace/
+unreal/EmotionDemo (Mac).xcworkspace/xcuserdata/
