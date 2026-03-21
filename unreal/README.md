@@ -145,6 +145,82 @@ Double-click `unreal/EmotionDemo.uproject`, or run:
 
 ---
 
+## How to open and build the Unreal project on Windows
+
+### Prerequisites (Windows)
+
+| Tool | Version | Where to get |
+| ---- | ------- | ------------ |
+| Unreal Engine | 5.4 or later | Epic Games Launcher |
+| Visual Studio | 2022 Community or higher | [visualstudio.microsoft.com](https://visualstudio.microsoft.com) |
+| VS Workloads | "Game development with C++" + ".NET desktop" | VS Installer |
+| Windows SDK | 10.0.18362.0 or later | VS Installer → Individual Components |
+| Python 3.11+ | Any | See repo root README |
+
+> During Visual Studio installation, select the **"Game development with C++"** workload.
+> It installs the MSVC compiler, Windows SDK, and CMake — all required by Unreal Build Tool.
+
+### 1. Generate Visual Studio project files
+
+Open a **Developer Command Prompt for VS 2022** (or any terminal with `msbuild` in PATH),
+then run:
+
+```bat
+"C:\Program Files\Epic Games\UE_5.4\Engine\Build\BatchFiles\GenerateProjectFiles.bat" ^
+    "C:\path\to\speech-emotion-recognition\unreal\EmotionDemo.uproject" -game
+```
+
+Replace `UE_5.4` with your installed engine version (e.g. `UE_5.7`).
+
+This creates `unreal\EmotionDemo.sln`.
+
+Alternatively, right-click `EmotionDemo.uproject` in File Explorer and choose
+**Generate Visual Studio project files** (requires the engine's shell extension to be
+registered, which happens automatically during engine installation).
+
+### 2. Build in Visual Studio
+
+```bat
+start unreal\EmotionDemo.sln
+```
+
+In Visual Studio:
+
+1. Set the **Solution Configuration** to `Development Editor`.
+2. Set the **Solution Platform** to `Win64`.
+3. In Solution Explorer, right-click **EmotionDemo** → **Build**.
+
+The first build takes 15–30 minutes. Incremental rebuilds are 1–5 minutes.
+
+You can also build from the command line without opening the IDE:
+
+```bat
+msbuild unreal\EmotionDemo.sln /p:Configuration="Development Editor" /p:Platform=Win64 /m
+```
+
+### 3. Launch the Unreal Editor (Windows)
+
+Double-click `unreal\EmotionDemo.uproject`, or run:
+
+```bat
+"C:\Program Files\Epic Games\UE_5.4\Engine\Binaries\Win64\UnrealEditor.exe" ^
+    "C:\path\to\speech-emotion-recognition\unreal\EmotionDemo.uproject"
+```
+
+### Windows-specific notes
+
+- **Firewall prompt:** Windows may ask to allow `UnrealEditor.exe` network access when the
+  panel makes its first HTTP request. Click **Allow** to permit connections to `localhost:8000`.
+- **Long path errors:** Enable long path support (`gpedit.msc` →
+  Computer Configuration → Administrative Templates → System → Filesystem →
+  Enable Win32 long paths) if the build fails with `PathTooLong` errors.
+- **Audio playback:** The panel plays WAV files via PowerShell's `System.Media.SoundPlayer`,
+  which is built into all Windows versions — no extra software needed.
+- **Microphone access:** Windows 10/11 requires microphone permission for the recording
+  feature. Check **Settings → Privacy → Microphone** and ensure the toggle is on.
+
+---
+
 ## How to open the Emotion Bridge tab
 
 In the main editor menu bar: **Window → Emotion Bridge**
@@ -181,6 +257,71 @@ auto-resample internally.
 
 ---
 
+## Running the animation in PIE (Play In Editor)
+
+The **Emotion Bridge panel** drives the lamp in the editor world (no PIE required). However,
+if you want the emotion colors to animate while the game is actually running — in PIE or a
+packaged build — use the `UEmotionPlaybackComponent` that ships with the plugin.
+
+### What UEmotionPlaybackComponent does
+
+It is a standard `UActorComponent` that:
+
+- Accepts a `FEmotionTimelineResponse` struct (populated by the panel's **Analyze** step).
+- Accumulates time each `TickComponent` and calls `ApplyEmotion()` on a target
+  `AEmotionLampActor` when the active segment changes.
+- Works identically in PIE, packaged builds, and on both macOS and Windows.
+
+### Setup
+
+1. In the editor, analyze a WAV file in the **Emotion Bridge** panel.
+1. The panel stores the last parsed timeline in `CurrentTimeline` — it also drives the
+   editor-world lamp during **Play Demo**.
+1. To animate the lamp during PIE, select the `AEmotionLampActor` in the viewport, click
+   **+ Add Component** in the Details panel, and add **EmotionPlaybackComponent**. Then set
+   **Target Lamp Actor** to the lamp in the level.
+1. In your game's **BeginPlay** (Blueprint or C++), call:
+
+**Blueprint:**
+
+```text
+Get EmotionPlaybackComponent → Set Timeline (the FEmotionTimelineResponse from your C++ code)
+Get EmotionPlaybackComponent → Start Playback
+```
+
+**C++ (in your AGameMode or APawn BeginPlay):**
+
+```cpp
+UEmotionPlaybackComponent* Comp = LampActor->FindComponentByClass<UEmotionPlaybackComponent>();
+if (Comp)
+{
+    Comp->SetTimeline(MyParsedTimeline);   // FEmotionTimelineResponse
+    Comp->StartPlayback();
+}
+```
+
+1. Press **Play** (Alt+P) in the Unreal Editor. The lamp cycles through emotion colors in sync
+   with the timeline while the game runs. Press **Stop** to end PIE.
+
+### Running the full loop in PIE
+
+The recommended flow for a live demo:
+
+1. Start the backend (`docker compose up api`).
+2. Open **Window → Emotion Bridge** in the editor.
+3. Record a clip with the **Record** button (or Browse for a WAV).
+4. Click **Analyze** — wait for results.
+5. Click **Play Demo** to preview in the editor world (no PIE needed).
+6. Press **Alt+P** to enter PIE — `UEmotionPlaybackComponent` replays the same
+   timeline inside the game world. The audio plays simultaneously via
+   `afplay` (macOS) or PowerShell `SoundPlayer` (Windows).
+7. Press **Escape** or **Stop** to exit PIE.
+
+> **Tip:** You do not need to re-analyze between PIE sessions.
+> The parsed timeline persists in memory until you close the editor or click Analyze again.
+
+---
+
 ## Troubleshooting
 
 | Symptom | Cause | Fix |
@@ -202,8 +343,6 @@ auto-resample internally.
 
 ## Future extensions
 
-- **Microphone capture:** Use UE's `AudioCaptureComponent` to record audio at runtime,
-  save to a temp WAV, then call `/timeline`. No backend changes needed.
 - **In-game HUD widget:** Replace the editor tab with a `UUserWidget` for use in PIE/packaged builds.
 - **MetaHuman / blendshapes:** Map emotion labels to ARKit blend shape curves on a
   MetaHuman face mesh using the `LiveLink` module.
