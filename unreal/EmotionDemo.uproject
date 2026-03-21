@@ -1,0 +1,22 @@
+{
+	"FileVersion": 3,
+	"EngineAssociation": "5.4",
+	"Category": "",
+	"Description": "EmotionDemo — Unreal Engine proof-of-integration demo for the speech-emotion-recognition backend.",
+	"Modules": [
+		{
+			"Name": "EmotionDemo",
+			"Type": "Runtime",
+			"LoadingPhase": "Default",
+			"AdditionalDependencies": [
+				"Engine"
+			]
+		}
+	],
+	"Plugins": [
+		{
+			"Name": "EmotionBridge",
+			"Enabled": true
+		}
+	]
+}

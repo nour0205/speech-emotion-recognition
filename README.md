@@ -42,7 +42,12 @@ speech-emotion-recognition/
 ├── docker-compose.yml         # Container orchestration
 ├── Dockerfile.dev             # Development container
 ├── Makefile                   # Convenience commands
-└── MIGRATION_NOTES.md         # Restructuring documentation
+├── MIGRATION_NOTES.md         # Restructuring documentation
+└── unreal/                    # Unreal Engine 5 integration (see unreal/README.md)
+    ├── EmotionDemo.uproject
+    ├── Config/
+    ├── Source/EmotionDemo/
+    └── Plugins/EmotionBridge/ # EmotionBridge plugin (runtime + editor modules)
 ```
 
 ## 🚀 Quick Start
@@ -1097,6 +1102,40 @@ docker compose run --rm dev pytest tests/test_api_health.py tests/test_api_predi
 # Run with integration tests (downloads model)
 docker compose run --rm -e RUN_INTEGRATION_TESTS=1 dev pytest tests/test_api_*.py -v
 ```
+
+## 🎮 Unreal Engine 5 Integration
+
+The `unreal/` folder contains a complete UE5 project + plugin that connects the
+Unreal Editor to this backend over HTTP — no ML code runs inside Unreal.
+
+**Demo flow:** Select WAV → click Analyze → backend returns emotion timeline →
+segment list appears in a custom dockable tab → click Play Demo → a lamp actor's
+point-light color changes in real time as each emotion segment becomes active.
+
+### Quick start
+
+```bash
+# 1. Start the backend
+docker compose up api
+
+# 2. Generate Xcode project (run from repo root)
+UE5=/Applications/Epic\ Games/UE_5.4
+"$UE5/Engine/Build/BatchFiles/Mac/GenerateProjectFiles.sh" \
+    "$(pwd)/unreal/EmotionDemo.uproject" -game
+
+# 3. Build in Xcode
+open unreal/EmotionDemo.xcworkspace
+# Select scheme: EmotionDemoEditor → ⌘B
+
+# 4. Open the project
+open unreal/EmotionDemo.uproject
+# Then: Window → Emotion Bridge
+```
+
+See [unreal/README.md](unreal/README.md) for full instructions and troubleshooting.
+See [docs/UNREAL_INTEGRATION.md](docs/UNREAL_INTEGRATION.md) for the architecture deep-dive.
+
+---
 
 ## 📄 License
 
