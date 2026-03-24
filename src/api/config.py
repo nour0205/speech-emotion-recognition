@@ -62,10 +62,10 @@ class Settings(BaseSettings):
     # Timeline defaults
     default_window_sec: float = 2.0
     default_hop_sec: float = 0.5
-    default_pad_mode: Literal["none", "zero", "reflect"] = "zero"
-    
+    default_pad_mode: Literal["none", "zero", "reflect"] = "none"
+
     # Smoothing defaults
-    default_smoothing_method: Literal["none", "majority", "hysteresis", "ema"] = "hysteresis"
+    default_smoothing_method: Literal["none", "majority", "hysteresis", "ema"] = "none"
     default_hysteresis_min_run: int = 3
     default_majority_window: int = 5
     default_ema_alpha: float = 0.6

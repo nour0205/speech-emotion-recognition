@@ -160,10 +160,14 @@ def _merge_adjacent_windows(windows: list[WindowPrediction]) -> list[Segment]:
             current_scores_list.append(window.scores)
             window_count += 1
         else:
-            # Different emotion - close current segment and start new one
+            # Different emotion - close current segment and start new one.
+            # Use window.start_sec (the next window's start) as the boundary,
+            # NOT current_end (the last window's end_sec). Windows overlap when
+            # hop < window_sec, so current_end would extend past the transition
+            # point and create overlapping segments.
             segments.append(_create_segment(
                 start_sec=current_start,
-                end_sec=current_end,
+                end_sec=window.start_sec,
                 emotion=current_emotion,
                 confidences=current_confidences,
                 scores_list=current_scores_list,

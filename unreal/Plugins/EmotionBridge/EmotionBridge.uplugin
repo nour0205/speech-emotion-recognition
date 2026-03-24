@@ -1,0 +1,35 @@
+{
+	"FileVersion": 3,
+	"Version": 1,
+	"VersionName": "1.0",
+	"FriendlyName": "EmotionBridge",
+	"Description": "Connects Unreal Engine 5 to a local speech emotion recognition backend via HTTP. Provides a dockable editor tool for analyzing WAV files and driving actor color changes from an emotion timeline.",
+	"Category": "Other",
+	"CreatedBy": "EmotionDemo",
+	"CreatedByURL": "",
+	"DocsURL": "",
+	"MarketplaceURL": "",
+	"SupportURL": "",
+	"CanContainContent": false,
+	"IsBetaVersion": false,
+	"IsExperimentalVersion": false,
+	"Installed": false,
+	"Plugins": [
+		{
+			"Name": "AudioCapture",
+			"Enabled": true
+		}
+	],
+	"Modules": [
+		{
+			"Name": "EmotionBridge",
+			"Type": "Runtime",
+			"LoadingPhase": "Default"
+		},
+		{
+			"Name": "EmotionBridgeEditor",
+			"Type": "Editor",
+			"LoadingPhase": "PostEngineInit"
+		}
+	]
+}
