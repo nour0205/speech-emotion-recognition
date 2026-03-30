@@ -5,6 +5,10 @@
 #include "EmotionBridgeSettings.h"
 #include "EmotionLampActor.h"
 #include "EmotionColorComponent.h"
+// Phase 2A
+#include "EmotionTakeStore.h"
+#include "SEmotionTakeLibrary.h"
+#include "Misc/DateTime.h"
 
 // Slate
 #include "Widgets/SBoxPanel.h"
@@ -136,6 +140,10 @@ void SEmotionBridgePanel::Construct(const FArguments& InArgs)
 			+ SVerticalBox::Slot().AutoHeight().Padding(0,6,0,6) [ BuildResultsSection() ]
 			+ SVerticalBox::Slot().AutoHeight().Padding(0,2)     [ SNew(SSeparator) ]
 			+ SVerticalBox::Slot().AutoHeight().Padding(0,6,0,6) [ BuildPlaybackSection() ]
+			+ SVerticalBox::Slot().AutoHeight().Padding(0,2)     [ SNew(SSeparator) ]
+			+ SVerticalBox::Slot().AutoHeight().Padding(0,6,0,6) [ BuildSaveTakeSection() ]
+			+ SVerticalBox::Slot().AutoHeight().Padding(0,2)     [ SNew(SSeparator) ]
+			+ SVerticalBox::Slot().AutoHeight().Padding(0,6,0,8) [ BuildTakeLibrarySection() ]
 		]
 	];
 }
@@ -761,6 +769,7 @@ void SEmotionBridgePanel::OnTimelineReceived(const FEmotionTimelineResponse& Res
 	if (!Response.bIsValid)
 	{
 		SetStatus(FString::Printf(TEXT("Error: %s"), *Response.ErrorMessage), FLinearColor::Red);
+		PendingReanalyzeTakeId.Empty();
 		return;
 	}
 
@@ -774,8 +783,67 @@ void SEmotionBridgePanel::OnTimelineReceived(const FEmotionTimelineResponse& Res
 	if (MetadataText.IsValid())
 		MetadataText->SetText(FText::FromString(Meta));
 
+	// ---- Phase 2A: reanalysis in-place ----------------------------------------
+	if (!PendingReanalyzeTakeId.IsEmpty())
+	{
+		FEmotionTakeRecord Existing;
+		if (FEmotionTakeStore::LoadTake(PendingReanalyzeTakeId, Existing))
+		{
+			// Replace analysis data; keep identity/annotations.
+			Existing.Timeline   = Response;
+			Existing.DurationSec = Response.DurationSec;
+			Existing.SampleRate  = Response.SampleRate;
+			Existing.Params.WindowSec        = WindowSec;
+			Existing.Params.HopSec           = HopSec;
+			Existing.Params.PadMode          = PadMode;
+			Existing.Params.SmoothingMethod  = SmoothingMethod;
+			Existing.Params.HysteresisMinRun = HysteresisMinRun;
+			Existing.Params.MajorityWindow   = MajorityWindow;
+			Existing.Params.EmaAlpha         = EmaAlpha;
+			Existing.UpdatedAt = FDateTime::UtcNow().ToIso8601();
+
+			if (FEmotionTakeStore::SaveTake(Existing, /*bCopyAudio=*/false))
+			{
+				SetStatus(
+					FString::Printf(
+						TEXT("Reanalysis complete \u2014 take \u201c%s\u201d updated (%d segments)."),
+						*Existing.DisplayName, Response.Segments.Num()),
+					FLinearColor::Green);
+			}
+			else
+			{
+				SetStatus(
+					FString::Printf(
+						TEXT("Reanalysis complete but save failed for take \u201c%s\u201d."),
+						*Existing.DisplayName),
+					FLinearColor(1.f, 0.5f, 0.f));
+			}
+
+			if (TakeLibraryWidget.IsValid()) TakeLibraryWidget->RefreshLibrary();
+		}
+		else
+		{
+			UE_LOG(LogEmotionBridge, Warning,
+				TEXT("OnTimelineReceived: could not load take '%s' for in-place update."),
+				*PendingReanalyzeTakeId);
+			SetStatus(
+				FString::Printf(TEXT("Analysis complete \u2014 %d segments (take update failed, check log)."),
+					Response.Segments.Num()),
+				FLinearColor(1.f, 0.5f, 0.f));
+		}
+
+		PendingReanalyzeTakeId.Empty();
+		bCanSaveTake = false; // already saved — do not prompt again
+		return;
+	}
+	// ---------------------------------------------------------------------------
+
+	// Normal (new) analysis complete — let the user save as a new take.
+	bCanSaveTake = true;
 	SetStatus(
-		FString::Printf(TEXT("Analysis complete \u2014 %d segments detected. Click Play Demo."),
+		FString::Printf(
+			TEXT("Analysis complete \u2014 %d segments detected. "
+			     "Click Play Demo or Save Take below."),
 			Response.Segments.Num()),
 		FLinearColor::Green);
 }
@@ -1128,6 +1196,228 @@ FSlateColor SEmotionBridgePanel::GetSlateColorForEmotion(const FString& Emotion)
 	const UEmotionBridgeSettings* S = UEmotionBridgeSettings::Get();
 	if (S) return FSlateColor(S->GetColorForEmotion(Emotion));
 	return FSlateColor::UseForeground();
+}
+
+// ============================================================================
+// Phase 2A — Save Take section builder
+// ============================================================================
+
+TSharedRef<SWidget> SEmotionBridgePanel::BuildSaveTakeSection()
+{
+	return SNew(SVerticalBox)
+		+ SVerticalBox::Slot().AutoHeight().Padding(0,0,0,4)
+		[
+			SNew(STextBlock)
+			.Text(LOCTEXT("SaveTakeHdr", "SAVE TAKE"))
+			.Font(FCoreStyle::GetDefaultFontStyle("Bold", 10))
+		]
+		+ SVerticalBox::Slot().AutoHeight().Padding(0,0,0,4)
+		[
+			SNew(STextBlock)
+			.Text(LOCTEXT("SaveTakeDesc",
+				"After a successful analysis, save it as a named Take. "
+				"Takes are stored in Saved/EmotionBridge/Takes/ and can be "
+				"reloaded later without re-running the backend."))
+			.AutoWrapText(true)
+			.ColorAndOpacity(FSlateColor::UseSubduedForeground())
+		]
+		+ SVerticalBox::Slot().AutoHeight()
+		[
+			SNew(SHorizontalBox)
+			+ SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center).Padding(0,0,6,0)
+			[ SNew(STextBlock).Text(LOCTEXT("TakeNameLbl", "Take Name:")) ]
+			+ SHorizontalBox::Slot().FillWidth(1.f)
+			[
+				SAssignNew(TakeNameBox, SEditableTextBox)
+				.HintText(LOCTEXT("TakeNameHint",
+					"e.g. Actor02_angry_take3  (leave blank for auto name)"))
+				.IsEnabled_Lambda([this]{ return bCanSaveTake; })
+			]
+			+ SHorizontalBox::Slot().AutoWidth().Padding(6,0,0,0)
+			[
+				SNew(SButton)
+				.Text(LOCTEXT("SaveTakeBtn", "Save Take"))
+				.ToolTipText(LOCTEXT("SaveTakeTip",
+					"Persist the current analysis as a named Take.\n"
+					"Saves timeline.json, params.json, metadata.json, and a copy of "
+					"the source WAV to Saved/EmotionBridge/Takes/<TakeId>/"))
+				.IsEnabled_Lambda([this]{ return bCanSaveTake && CurrentTimeline.bIsValid; })
+				.OnClicked(this, &SEmotionBridgePanel::OnSaveTakeClicked)
+			]
+		];
+}
+
+FReply SEmotionBridgePanel::OnSaveTakeClicked()
+{
+	if (!CurrentTimeline.bIsValid)
+	{
+		SetStatus(TEXT("Nothing to save — run Analyze first."), FLinearColor(1,0.5f,0));
+		return FReply::Handled();
+	}
+
+	FString TakeName = TakeNameBox.IsValid() ? TakeNameBox->GetText().ToString().TrimStartAndEnd() : FString{};
+	if (TakeName.IsEmpty())
+		TakeName = FEmotionTakeStore::GenerateDefaultDisplayName();
+
+	FEmotionTakeRecord Record;
+	Record.TakeId        = FEmotionTakeStore::GenerateTakeId();
+	Record.DisplayName   = TakeName;
+	Record.CreatedAt     = FDateTime::UtcNow().ToIso8601();
+	Record.UpdatedAt     = Record.CreatedAt;
+	Record.SourceAudioPath = WavFilePath;
+	Record.DurationSec   = CurrentTimeline.DurationSec;
+	Record.SampleRate    = CurrentTimeline.SampleRate;
+	Record.Timeline      = CurrentTimeline;
+
+	Record.Params.WindowSec        = WindowSec;
+	Record.Params.HopSec           = HopSec;
+	Record.Params.PadMode          = PadMode;
+	Record.Params.SmoothingMethod  = SmoothingMethod;
+	Record.Params.HysteresisMinRun = HysteresisMinRun;
+	Record.Params.MajorityWindow   = MajorityWindow;
+	Record.Params.EmaAlpha         = EmaAlpha;
+
+	if (FEmotionTakeStore::SaveTake(Record, /*bCopyAudio=*/true))
+	{
+		SetStatus(
+			FString::Printf(TEXT("Take \u201c%s\u201d saved  (%s)."),
+				*TakeName, *Record.TakeId.Left(8)),
+			FLinearColor::Green);
+
+		// Reset the name box so typing a fresh name is easy next time.
+		if (TakeNameBox.IsValid()) TakeNameBox->SetText(FText::GetEmpty());
+		bCanSaveTake = false;
+
+		if (TakeLibraryWidget.IsValid())
+		{
+			TakeLibraryWidget->RefreshLibrary();
+			TakeLibraryWidget->SelectTakeById(Record.TakeId);
+		}
+	}
+	else
+	{
+		SetStatus(TEXT("Take save failed — check Output Log for details."), FLinearColor::Red);
+	}
+
+	return FReply::Handled();
+}
+
+// ============================================================================
+// Phase 2A — Take Library section builder
+// ============================================================================
+
+TSharedRef<SWidget> SEmotionBridgePanel::BuildTakeLibrarySection()
+{
+	SAssignNew(TakeLibraryWidget, SEmotionTakeLibrary)
+		.OnLoadRequested_Lambda([this](const FEmotionTakeRecord& T){ OnLoadTakeRequested(T); })
+		.OnPlayRequested_Lambda([this](const FEmotionTakeRecord& T){ OnPlayTakeRequested(T); })
+		.OnReanalyzeRequested_Lambda([this](const FEmotionTakeRecord& T){ OnReanalyzeTakeRequested(T); });
+
+	return TakeLibraryWidget.ToSharedRef();
+}
+
+// ============================================================================
+// Phase 2A — Take Library action handlers
+// ============================================================================
+
+void SEmotionBridgePanel::OnLoadTakeRequested(const FEmotionTakeRecord& Take)
+{
+	// Restore timeline.
+	CurrentTimeline = Take.Timeline;
+
+	// Restore the best available audio path.
+	const FString BestAudio = Take.GetBestAudioPath();
+	if (!BestAudio.IsEmpty())
+	{
+		WavFilePath = BestAudio;
+		if (WavPathBox.IsValid())
+			WavPathBox->SetText(FText::FromString(WavFilePath));
+	}
+
+	// Restore analysis parameters into panel state.
+	WindowSec        = Take.Params.WindowSec;
+	HopSec           = Take.Params.HopSec;
+	PadMode          = Take.Params.PadMode;
+	SmoothingMethod  = Take.Params.SmoothingMethod;
+	HysteresisMinRun = Take.Params.HysteresisMinRun;
+	MajorityWindow   = Take.Params.MajorityWindow;
+	EmaAlpha         = Take.Params.EmaAlpha;
+
+	// Sync combo selections to the restored parameter values.
+	for (auto& O : PadModeOptions)
+		if (*O == PadMode) { SelectedPadMode = O; break; }
+	for (auto& O : SmoothingOptions)
+		if (*O == SmoothingMethod) { SelectedSmoothingMethod = O; break; }
+
+	// Update results area.
+	RefreshSegmentList();
+
+	const FString Meta = FString::Printf(
+		TEXT("Loaded take \u201c%s\u201d  |  duration=%.2f s  segments=%d  model=%s"),
+		*Take.DisplayName, Take.DurationSec, Take.Timeline.Segments.Num(),
+		*Take.Timeline.ModelName);
+	if (MetadataText.IsValid())
+		MetadataText->SetText(FText::FromString(Meta));
+
+	// A loaded take is already saved — don't prompt to save again.
+	bCanSaveTake = false;
+
+	SetStatus(
+		FString::Printf(TEXT("Take \u201c%s\u201d loaded. Click Play Demo to replay."),
+			*Take.DisplayName),
+		FLinearColor::Green);
+}
+
+void SEmotionBridgePanel::OnPlayTakeRequested(const FEmotionTakeRecord& Take)
+{
+	OnLoadTakeRequested(Take);
+	// OnPlayDemo() is a FReply callback — call it and discard the returned value.
+	(void)OnPlayDemo();
+}
+
+void SEmotionBridgePanel::OnReanalyzeTakeRequested(const FEmotionTakeRecord& Take)
+{
+	const FString BestAudio = Take.GetBestAudioPath();
+	if (BestAudio.IsEmpty())
+	{
+		SetStatus(
+			FString::Printf(
+				TEXT("Reanalyze failed: no audio available for take \u201c%s\u201d."),
+				*Take.DisplayName),
+			FLinearColor::Red);
+		return;
+	}
+
+	// Restore params from the take so the same settings are used.
+	WavFilePath      = BestAudio;
+	WindowSec        = Take.Params.WindowSec;
+	HopSec           = Take.Params.HopSec;
+	PadMode          = Take.Params.PadMode;
+	SmoothingMethod  = Take.Params.SmoothingMethod;
+	HysteresisMinRun = Take.Params.HysteresisMinRun;
+	MajorityWindow   = Take.Params.MajorityWindow;
+	EmaAlpha         = Take.Params.EmaAlpha;
+
+	if (WavPathBox.IsValid())
+		WavPathBox->SetText(FText::FromString(WavFilePath));
+
+	// Tag this run so OnTimelineReceived() knows to do an in-place update.
+	PendingReanalyzeTakeId = Take.TakeId;
+
+	bIsAnalyzing = true;
+	CurrentTimeline = FEmotionTimelineResponse{};
+	RefreshSegmentList();
+	SetStatus(
+		FString::Printf(TEXT("Reanalysing take \u201c%s\u201d via /timeline/unreal..."),
+			*Take.DisplayName),
+		FLinearColor(1.f, 0.85f, 0.f));
+
+	ApiClient->RequestTimeline(
+		WavFilePath,
+		WindowSec, HopSec,
+		PadMode, SmoothingMethod, HysteresisMinRun,
+		static_cast<float>(MajorityWindow), EmaAlpha,
+		FOnTimelineComplete::CreateSP(this, &SEmotionBridgePanel::OnTimelineReceived));
 }
 
 #undef LOCTEXT_NAMESPACE

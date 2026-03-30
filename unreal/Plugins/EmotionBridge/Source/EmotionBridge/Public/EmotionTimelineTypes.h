@@ -35,10 +35,14 @@ struct EMOTIONBRIDGE_API FEmotionSegment
  *
  * Envelope:
  *   { "type": "timeline", "source": "ser_api", "version": "1.0",
+ *     "model_name": "speechbrain-iemocap", "sample_rate": 16000,
  *     "duration_sec": 10.5, "segments": [ {...}, ... ] }
  *
  * bIsValid is false when the request failed or JSON was malformed;
  * inspect ErrorMessage for a human-readable reason.
+ *
+ * Phase 2A additions: ModelName and SampleRate are stored in take records
+ * so takes are fully self-describing without re-calling the backend.
  */
 USTRUCT(BlueprintType)
 struct EMOTIONBRIDGE_API FEmotionTimelineResponse
@@ -56,6 +60,20 @@ struct EMOTIONBRIDGE_API FEmotionTimelineResponse
 	/** Schema version string, e.g. "1.0". */
 	UPROPERTY(BlueprintReadOnly, Category="EmotionBridge")
 	FString Version;
+
+	/**
+	 * Model identifier returned by the backend, e.g. "speechbrain-iemocap".
+	 * Populated by Phase 2A — stored in take records for provenance tracking.
+	 */
+	UPROPERTY(BlueprintReadOnly, Category="EmotionBridge")
+	FString ModelName;
+
+	/**
+	 * Sample rate of the audio file as reported by the backend (Hz).
+	 * Typically 16000.  Stored in take records for future audio pipeline use.
+	 */
+	UPROPERTY(BlueprintReadOnly, Category="EmotionBridge")
+	int32 SampleRate = 16000;
 
 	/** Total audio duration in seconds. */
 	UPROPERTY(BlueprintReadOnly, Category="EmotionBridge")

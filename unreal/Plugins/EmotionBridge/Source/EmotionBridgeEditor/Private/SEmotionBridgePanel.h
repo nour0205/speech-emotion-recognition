@@ -6,12 +6,14 @@
 #include "Widgets/SCompoundWidget.h"
 #include "EmotionApiClient.h"
 #include "EmotionTimelineTypes.h"
+#include "EmotionTakeTypes.h"   // Phase 2A
 #include "HAL/PlatformProcess.h"
 
 // AudioCapture is used for microphone recording.
 #include "AudioCapture.h"
 
 class AEmotionLampActor;
+class SEmotionTakeLibrary; // Phase 2A — forward declaration
 
 // ---------------------------------------------------------------------------
 // Row data for the segment list view
@@ -127,6 +129,8 @@ private:
 	TSharedRef<SWidget> BuildParametersSection();
 	TSharedRef<SWidget> BuildResultsSection();
 	TSharedRef<SWidget> BuildPlaybackSection();
+	TSharedRef<SWidget> BuildSaveTakeSection();     // Phase 2A
+	TSharedRef<SWidget> BuildTakeLibrarySection();  // Phase 2A
 
 	// -----------------------------------------------------------------------
 	// Button callbacks
@@ -139,6 +143,7 @@ private:
 	FReply OnPlayDemo();
 	FReply OnStopDemo();
 	FReply OnFocusViewport();
+	FReply OnSaveTakeClicked(); // Phase 2A
 
 	// -----------------------------------------------------------------------
 	// Internal
@@ -172,4 +177,47 @@ private:
 		const TSharedRef<STableViewBase>& OwnerTable);
 
 	FSlateColor GetSlateColorForEmotion(const FString& Emotion) const;
+
+	// -----------------------------------------------------------------------
+	// Phase 2A: Take Library callbacks  (wired to SEmotionTakeLibrary)
+	// -----------------------------------------------------------------------
+
+	/**
+	 * Load a take: restore timeline, params, and WAV path from a saved record.
+	 * Does NOT call the backend — the take is fully self-contained.
+	 */
+	void OnLoadTakeRequested(const FEmotionTakeRecord& Take);
+
+	/**
+	 * Load a take and immediately start playback (combines load + Play Demo).
+	 */
+	void OnPlayTakeRequested(const FEmotionTakeRecord& Take);
+
+	/**
+	 * Trigger reanalysis for an existing take.
+	 * Sets WavFilePath and params from the stored record, then fires the
+	 * /timeline/unreal request.  When the response arrives, the take is
+	 * updated in-place (timeline + params replaced; name/notes/tags kept).
+	 */
+	void OnReanalyzeTakeRequested(const FEmotionTakeRecord& Take);
+
+	// -----------------------------------------------------------------------
+	// Phase 2A state
+	// -----------------------------------------------------------------------
+
+	/** Becomes true after a successful analysis. Enables the Save Take button. */
+	bool bCanSaveTake = false;
+
+	/**
+	 * When non-empty, the next OnTimelineReceived() will update this take ID
+	 * in-place instead of just populating the panel.
+	 * Set by OnReanalyzeTakeRequested(); cleared in OnTimelineReceived().
+	 */
+	FString PendingReanalyzeTakeId;
+
+	/** Name entry box inside the Save Take section. */
+	TSharedPtr<SEditableTextBox> TakeNameBox;
+
+	/** The embedded Take Library widget. */
+	TSharedPtr<SEmotionTakeLibrary> TakeLibraryWidget;
 };

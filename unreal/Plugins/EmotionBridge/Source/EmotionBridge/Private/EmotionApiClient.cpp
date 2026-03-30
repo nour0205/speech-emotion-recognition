@@ -215,11 +215,14 @@ FEmotionTimelineResponse FEmotionApiClient::ParseTimelineResponse(
 	}
 
 	// Envelope fields.
-	Root->TryGetStringField(TEXT("type"),    R.Type);
-	Root->TryGetStringField(TEXT("source"),  R.Source);
-	Root->TryGetStringField(TEXT("version"), R.Version);
+	Root->TryGetStringField(TEXT("type"),       R.Type);
+	Root->TryGetStringField(TEXT("source"),     R.Source);
+	Root->TryGetStringField(TEXT("version"),    R.Version);
+	Root->TryGetStringField(TEXT("model_name"), R.ModelName); // Phase 2A — stored in takes
 
 	double Tmp = 0.0;
+	if (Root->TryGetNumberField(TEXT("sample_rate"),  Tmp))   // Phase 2A — stored in takes
+		R.SampleRate = static_cast<int32>(Tmp);
 	if (Root->TryGetNumberField(TEXT("duration_sec"), Tmp))
 		R.DurationSec = static_cast<float>(Tmp);
 
@@ -248,8 +251,8 @@ FEmotionTimelineResponse FEmotionApiClient::ParseTimelineResponse(
 	}
 
 	UE_LOG(LogEmotionBridge, Log,
-		TEXT("Parsed /timeline/unreal: type=%s source=%s duration=%.2f segments=%d"),
-		*R.Type, *R.Source, R.DurationSec, R.Segments.Num());
+		TEXT("Parsed /timeline/unreal: type=%s source=%s model=%s sr=%d duration=%.2f segments=%d"),
+		*R.Type, *R.Source, *R.ModelName, R.SampleRate, R.DurationSec, R.Segments.Num());
 
 	R.bIsValid = true;
 	bOutSuccess = true;
