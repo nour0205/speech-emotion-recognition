@@ -17,6 +17,10 @@
 		{
 			"Name": "EmotionBridge",
 			"Enabled": true
+		},
+		{
+			"Name": "MetaHumanCharacter",
+			"Enabled": true
 		}
 	]
 }

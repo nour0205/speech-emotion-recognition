@@ -296,10 +296,14 @@ bool FEmotionTakeStore::DeleteTake(const FString& TakeId)
 
 	const bool bOk = IFileManager::Get().DeleteDirectory(*FolderPath, /*RequireExists=*/false, /*Tree=*/true);
 	if (bOk)
+	{
 		UE_LOG(LogEmotionBridge, Log, TEXT("FEmotionTakeStore: deleted take '%s'"), *TakeId);
+	}
 	else
+	{
 		UE_LOG(LogEmotionBridge, Error,
 			TEXT("FEmotionTakeStore: failed to delete folder '%s'"), *FolderPath);
+	}
 	return bOk;
 }
 
@@ -391,11 +395,16 @@ bool FEmotionTakeStore::WriteMetadataJson(const FEmotionTakeRecord& Record, cons
 	J->SetArrayField(TEXT("tags"), TagsArr);
 
 	TSharedRef<FJsonObject> P2B = MakeShared<FJsonObject>();
+	// Phase 2A fields
 	P2B->SetStringField(TEXT("cleaned_audio_path"),          Record.Phase2B.CleanedAudioPath);
 	P2B->SetStringField(TEXT("sound_wave_asset"),            Record.Phase2B.SoundWaveAssetPath);
 	P2B->SetStringField(TEXT("metahuman_performance_asset"), Record.Phase2B.MetaHumanPerformancePath);
 	P2B->SetStringField(TEXT("level_sequence_asset"),        Record.Phase2B.LevelSequencePath);
 	P2B->SetStringField(TEXT("emotion_preset_mapping"),      Record.Phase2B.EmotionPresetMappingPath);
+	// Phase 2B additions
+	P2B->SetStringField(TEXT("bound_actor_label"),           Record.Phase2B.BoundActorLabel);
+	P2B->SetNumberField(TEXT("overlay_blend_duration_sec"),  Record.Phase2B.OverlayBlendDurationSec);
+	P2B->SetBoolField  (TEXT("overlay_enabled"),             Record.Phase2B.bOverlayEnabled);
 	J->SetObjectField(TEXT("phase2b"), P2B);
 
 	FString Out;
@@ -500,11 +509,18 @@ bool FEmotionTakeStore::ReadMetadataJson(const FString& FilePath, FEmotionTakeRe
 	const TSharedPtr<FJsonObject>* P2BObj = nullptr;
 	if (J->TryGetObjectField(TEXT("phase2b"), P2BObj) && P2BObj)
 	{
+		// Phase 2A fields
 		(*P2BObj)->TryGetStringField(TEXT("cleaned_audio_path"),          OutRecord.Phase2B.CleanedAudioPath);
 		(*P2BObj)->TryGetStringField(TEXT("sound_wave_asset"),            OutRecord.Phase2B.SoundWaveAssetPath);
 		(*P2BObj)->TryGetStringField(TEXT("metahuman_performance_asset"), OutRecord.Phase2B.MetaHumanPerformancePath);
 		(*P2BObj)->TryGetStringField(TEXT("level_sequence_asset"),        OutRecord.Phase2B.LevelSequencePath);
 		(*P2BObj)->TryGetStringField(TEXT("emotion_preset_mapping"),      OutRecord.Phase2B.EmotionPresetMappingPath);
+		// Phase 2B additions (TryGet leaves defaults when key is absent — backwards compat)
+		(*P2BObj)->TryGetStringField(TEXT("bound_actor_label"),           OutRecord.Phase2B.BoundActorLabel);
+		double BlendDur = OutRecord.Phase2B.OverlayBlendDurationSec;
+		if ((*P2BObj)->TryGetNumberField(TEXT("overlay_blend_duration_sec"), BlendDur))
+			OutRecord.Phase2B.OverlayBlendDurationSec = static_cast<float>(BlendDur);
+		(*P2BObj)->TryGetBoolField(TEXT("overlay_enabled"), OutRecord.Phase2B.bOverlayEnabled);
 	}
 
 	return true;

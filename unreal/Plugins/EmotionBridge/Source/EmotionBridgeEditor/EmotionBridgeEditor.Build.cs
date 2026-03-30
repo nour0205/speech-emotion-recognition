@@ -31,6 +31,7 @@ public class EmotionBridgeEditor : ModuleRules
 			"AudioCaptureCore",   // Audio::FAudioCapture implementation
 			"AudioCapture",       // Audio::FAudioCapture — microphone recording
 			"EditorFramework",    // FLevelEditorViewportClient (viewport focus)
+			"AssetTools",         // Phase 2B: IAssetTools::ImportAssetTasks (SoundWave import)
 		});
 
 		PrivateIncludePaths.AddRange(new string[]

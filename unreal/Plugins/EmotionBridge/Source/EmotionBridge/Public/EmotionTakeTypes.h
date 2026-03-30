@@ -54,33 +54,66 @@ struct EMOTIONBRIDGE_API FEmotionTakeSummary
 // ---------------------------------------------------------------------------
 // FEmotionTakePhase2B
 //
-// Forward-compatible placeholder fields for the MetaHuman integration phase.
-// All fields are empty strings until Phase 2B is implemented.
-// None of these are populated or used in Phase 2A.
+// Per-take metadata for the MetaHuman facial animation workflow (Phase 2B).
+// All new fields use safe defaults so old takes (missing these JSON keys)
+// load without errors — TryGetStringField / TryGetNumberField / TryGetBoolField
+// leave fields at their defaults when the key is absent.
+//
+// JSON keys for new fields (Phase 2B additions):
+//   "bound_actor_label"          → BoundActorLabel
+//   "overlay_blend_duration_sec" → OverlayBlendDurationSec
+//   "overlay_enabled"            → bOverlayEnabled
 // ---------------------------------------------------------------------------
 
 struct EMOTIONBRIDGE_API FEmotionTakePhase2B
 {
+	// ── Phase 2A placeholders (already existed) ─────────────────────────────
+
 	/** Path to a noise-cleaned copy of the source WAV (future: denoising pipeline). */
 	FString CleanedAudioPath;
 
-	/** Content-browser path to the imported UE SoundWave asset, e.g. "/Game/Sounds/Take01". */
+	/**
+	 * Content-browser path to the imported UE SoundWave asset.
+	 * Example: "/Game/EmotionBridge/Audio/MySpeech"
+	 * Populated when the user clicks "Import WAV as SoundWave" in the panel.
+	 */
 	FString SoundWaveAssetPath;
 
 	/**
 	 * Content-browser path to the MetaHuman Performance asset.
-	 * Populated in Phase 2B by the facial solve pipeline.
+	 * Reserved for a future automated solve pipeline.
 	 */
 	FString MetaHumanPerformancePath;
 
-	/** Content-browser path to the generated Level Sequence (facial + body animation). */
+	/** Content-browser path to a generated Level Sequence (future export). */
 	FString LevelSequencePath;
 
 	/**
-	 * Path or asset ref to an emotion→morph-target preset mapping asset.
-	 * Defines which facial blend shapes correspond to each emotion label.
+	 * Path to an emotion→morph-target preset mapping asset (future DataAsset).
+	 * In Phase 2B the presets live in UMetaHumanEmotionDriverComponent directly.
 	 */
 	FString EmotionPresetMappingPath;
+
+	// ── Phase 2B additions ───────────────────────────────────────────────────
+
+	/**
+	 * Display label of the MetaHuman actor that was bound when this take was saved.
+	 * This is informational only — the actor must be re-bound manually on load
+	 * (actor references are not persisted across editor sessions).
+	 */
+	FString BoundActorLabel;
+
+	/**
+	 * Blend duration (seconds) that was active when this take was saved.
+	 * Restored to the panel when the take is loaded.
+	 */
+	float OverlayBlendDurationSec = 0.4f;
+
+	/**
+	 * Whether the emotion overlay was enabled when this take was saved.
+	 * Restored to the panel's overlay toggle when the take is loaded.
+	 */
+	bool bOverlayEnabled = true;
 };
 
 // ---------------------------------------------------------------------------

@@ -9,6 +9,9 @@
 #include "EmotionTakeStore.h"
 #include "SEmotionTakeLibrary.h"
 #include "Misc/DateTime.h"
+// Phase 2B
+#include "MetaHumanEmotionDriverComponent.h"
+#include "EmotionAudioAssetHelper.h"
 
 // Slate
 #include "Widgets/SBoxPanel.h"
@@ -31,6 +34,7 @@
 // Editor
 #include "Editor.h"
 #include "EngineUtils.h"
+#include "Selection.h"          // USelection (GEditor->GetSelectedActors)
 #include "IDesktopPlatform.h"
 #include "DesktopPlatformModule.h"
 #include "Framework/Application/SlateApplication.h"
@@ -79,6 +83,12 @@ void SEmotionBridgePanel::Construct(const FArguments& InArgs)
 	SetCanTick(true);
 
 	ApiClient = MakeUnique<FEmotionApiClient>(DefaultUrl);
+
+	// Phase 2B: seed per-emotion intensity multipliers at 1.0
+	EmotionIntensityMultipliers.Add(TEXT("angry"),   1.0f);
+	EmotionIntensityMultipliers.Add(TEXT("happy"),   1.0f);
+	EmotionIntensityMultipliers.Add(TEXT("sad"),     1.0f);
+	EmotionIntensityMultipliers.Add(TEXT("neutral"), 1.0f);
 
 	ChildSlot
 	[
@@ -144,6 +154,8 @@ void SEmotionBridgePanel::Construct(const FArguments& InArgs)
 			+ SVerticalBox::Slot().AutoHeight().Padding(0,6,0,6) [ BuildSaveTakeSection() ]
 			+ SVerticalBox::Slot().AutoHeight().Padding(0,2)     [ SNew(SSeparator) ]
 			+ SVerticalBox::Slot().AutoHeight().Padding(0,6,0,8) [ BuildTakeLibrarySection() ]
+			+ SVerticalBox::Slot().AutoHeight().Padding(0,2)     [ SNew(SSeparator) ]
+			+ SVerticalBox::Slot().AutoHeight().Padding(0,6,0,8) [ BuildMetaHumanSection() ] // Phase 2B
 		]
 	];
 }
@@ -232,6 +244,16 @@ void SEmotionBridgePanel::Tick(
 	{
 		// Gap between segments — neutral.
 		BroadcastEmotion(TEXT("neutral"), 1.0f);
+	}
+
+	// Phase 2B: update live emotion readout in the MetaHuman section.
+	if (MH_LiveEmotionText.IsValid() && BoundDriverComponent.IsValid())
+	{
+		const FString LiveLabel = FString::Printf(
+			TEXT("Active: %s  |  blend: %.0f%%"),
+			*BoundDriverComponent->GetCurrentEmotion().ToUpper(),
+			BoundDriverComponent->GetBlendAlpha() * 100.f);
+		MH_LiveEmotionText->SetText(FText::FromString(LiveLabel));
 	}
 }
 
@@ -729,6 +751,21 @@ FReply SEmotionBridgePanel::OnPlayDemo()
 		LastActiveSegmentIndex = 0;
 	}
 
+	// Phase 2B: configure emotion driver if a MetaHuman actor is bound.
+	if (BoundDriverComponent.IsValid())
+	{
+		FEmotionOverlaySettings NewSettings  = BoundDriverComponent->OverlaySettings;
+		NewSettings.bEnabled                 = bOverlayEnabled;
+		NewSettings.BlendDurationSec         = BlendDuration;
+		NewSettings.bUseConfidenceAsWeight   = bUseConfidenceAsWeight;
+		NewSettings.EmotionIntensityMultipliers = EmotionIntensityMultipliers;
+		BoundDriverComponent->OverlaySettings = NewSettings;
+		BoundDriverComponent->ResetToNeutral();
+		UE_LOG(LogEmotionBridge, Log,
+			TEXT("Phase2B: configured emotion driver on '%s' (blend=%.2fs, overlay=%s)."),
+			*BoundActorLabel, BlendDuration, bOverlayEnabled ? TEXT("on") : TEXT("off"));
+	}
+
 	LaunchAudioPlayer();
 
 	SetStatus(
@@ -752,6 +789,14 @@ FReply SEmotionBridgePanel::OnStopDemo()
 	BroadcastEmotion(TEXT("neutral"), 1.0f);
 	if (EmotionLabelDisplay.IsValid())
 		EmotionLabelDisplay->SetText(LOCTEXT("SwatchDefault", "\u2014"));
+
+	// Phase 2B: reset MetaHuman face to neutral.
+	if (BoundDriverComponent.IsValid())
+	{
+		BoundDriverComponent->ResetToNeutral();
+	}
+	if (MH_LiveEmotionText.IsValid())
+		MH_LiveEmotionText->SetText(LOCTEXT("MHLiveDefault", "\u2014"));
 
 	SetStatus(TEXT("Playback stopped."), FLinearColor::White);
 	UE_LOG(LogEmotionBridge, Log, TEXT("Demo playback stopped by user."));
@@ -904,6 +949,10 @@ void SEmotionBridgePanel::BroadcastEmotion(const FString& Emotion, float Confide
 	// 4. AEmotionLampActor (legacy — kept for backwards compatibility).
 	if (LampActorRef.IsValid())
 		LampActorRef->ApplyEmotion(Emotion, Confidence);
+
+	// 5. Phase 2B: drive MetaHuman face via emotion driver component.
+	if (BoundDriverComponent.IsValid())
+		BoundDriverComponent->ApplyEmotion(Emotion, Confidence);
 }
 
 // ---------------------------------------------------------------------------
@@ -1277,6 +1326,12 @@ FReply SEmotionBridgePanel::OnSaveTakeClicked()
 	Record.Params.MajorityWindow   = MajorityWindow;
 	Record.Params.EmaAlpha         = EmaAlpha;
 
+	// Phase 2B: persist MetaHuman binding state.
+	Record.Phase2B.SoundWaveAssetPath     = SoundWaveAssetPath;
+	Record.Phase2B.BoundActorLabel        = BoundActorLabel;
+	Record.Phase2B.OverlayBlendDurationSec = BlendDuration;
+	Record.Phase2B.bOverlayEnabled        = bOverlayEnabled;
+
 	if (FEmotionTakeStore::SaveTake(Record, /*bCopyAudio=*/true))
 	{
 		SetStatus(
@@ -1362,9 +1417,30 @@ void SEmotionBridgePanel::OnLoadTakeRequested(const FEmotionTakeRecord& Take)
 	// A loaded take is already saved — don't prompt to save again.
 	bCanSaveTake = false;
 
+	// Phase 2B: restore SoundWave path and overlay settings.
+	if (!Take.Phase2B.SoundWaveAssetPath.IsEmpty())
+	{
+		SoundWaveAssetPath = Take.Phase2B.SoundWaveAssetPath;
+		UpdateSoundWaveStatusUI();
+	}
+	if (!Take.Phase2B.BoundActorLabel.IsEmpty())
+	{
+		// Inform the user which actor was bound — they may need to rebind manually.
+		UE_LOG(LogEmotionBridge, Log,
+			TEXT("Phase2B: take was saved with actor '%s'. Rebind via 'Bind Selected Actor' if needed."),
+			*Take.Phase2B.BoundActorLabel);
+	}
+	BlendDuration    = Take.Phase2B.OverlayBlendDurationSec > 0.f
+		? Take.Phase2B.OverlayBlendDurationSec : BlendDuration;
+	bOverlayEnabled  = Take.Phase2B.bOverlayEnabled;
+
+	const FString BoundNote = Take.Phase2B.BoundActorLabel.IsEmpty()
+		? FString{}
+		: FString::Printf(TEXT(" (was bound to '%s')"), *Take.Phase2B.BoundActorLabel);
+
 	SetStatus(
-		FString::Printf(TEXT("Take \u201c%s\u201d loaded. Click Play Demo to replay."),
-			*Take.DisplayName),
+		FString::Printf(TEXT("Take \u201c%s\u201d loaded. Click Play Demo to replay.%s"),
+			*Take.DisplayName, *BoundNote),
 		FLinearColor::Green);
 }
 
@@ -1418,6 +1494,464 @@ void SEmotionBridgePanel::OnReanalyzeTakeRequested(const FEmotionTakeRecord& Tak
 		PadMode, SmoothingMethod, HysteresisMinRun,
 		static_cast<float>(MajorityWindow), EmaAlpha,
 		FOnTimelineComplete::CreateSP(this, &SEmotionBridgePanel::OnTimelineReceived));
+}
+
+// ============================================================================
+// Phase 2B — MetaHuman section builder
+// ============================================================================
+
+TSharedRef<SWidget> SEmotionBridgePanel::BuildMetaHumanSection()
+{
+	// Helpers for row labels with fixed width
+	auto RowLabel = [](FText Label) -> TSharedRef<SWidget>
+	{
+		return SNew(SBox).WidthOverride(130.f).VAlign(VAlign_Center)
+		[
+			SNew(STextBlock).Text(Label)
+		];
+	};
+
+	return SNew(SVerticalBox)
+
+	// ── Header ──────────────────────────────────────────────────────────────
+	+ SVerticalBox::Slot().AutoHeight().Padding(0,0,0,4)
+	[
+		SNew(STextBlock).Text(LOCTEXT("MHHdr", "METAHUMAN FACE  (Phase 2B)"))
+			.Font(FCoreStyle::GetDefaultFontStyle("Bold", 10))
+	]
+	+ SVerticalBox::Slot().AutoHeight().Padding(0,0,0,6)
+	[
+		SNew(STextBlock)
+		.Text(LOCTEXT("MHDesc",
+			"Bind a MetaHuman Actor to layer API-driven emotion onto its face during "
+			"playback.  The Emotion Overlay adds expression to the upper face (brow, "
+			"cheeks, eyes) without interfering with the base speech animation.  "
+			"See docs/METAHUMAN_PHASE2B.md for full setup instructions."))
+		.AutoWrapText(true)
+		.ColorAndOpacity(FSlateColor::UseSubduedForeground())
+	]
+
+	// ── TARGET BINDING ──────────────────────────────────────────────────────
+	+ SVerticalBox::Slot().AutoHeight().Padding(0,0,0,2)
+	[
+		SNew(STextBlock).Text(LOCTEXT("MHTargetSubHdr", "— TARGET —"))
+			.Font(FCoreStyle::GetDefaultFontStyle("Bold", 9))
+			.ColorAndOpacity(FSlateColor::UseSubduedForeground())
+	]
+	+ SVerticalBox::Slot().AutoHeight().Padding(0,0,0,4)
+	[
+		SNew(SHorizontalBox)
+		+ SHorizontalBox::Slot().AutoWidth().Padding(0,0,6,0)
+		[
+			SNew(SButton)
+			.Text(LOCTEXT("MHBindBtn", "Bind Selected Actor"))
+			.ToolTipText(LOCTEXT("MHBindTip",
+				"Select a MetaHuman Actor in the viewport, then click here.\n"
+				"A UMetaHumanEmotionDriverComponent is auto-added if not present.\n"
+				"The component drives morph targets during Play Demo."))
+			.OnClicked(this, &SEmotionBridgePanel::OnBindSelectedActor)
+		]
+		+ SHorizontalBox::Slot().AutoWidth().Padding(0,0,6,0)
+		[
+			SNew(SButton)
+			.Text(LOCTEXT("MHClearBtn", "Clear"))
+			.ToolTipText(LOCTEXT("MHClearTip",
+				"Unbind the current actor and reset its face to neutral."))
+			.IsEnabled_Lambda([this]{ return BoundDriverComponent.IsValid(); })
+			.OnClicked(this, &SEmotionBridgePanel::OnClearMetaHumanBinding)
+		]
+	]
+	+ SVerticalBox::Slot().AutoHeight().Padding(0,0,0,2)
+	[
+		SNew(SHorizontalBox)
+		+ SHorizontalBox::Slot().AutoWidth()[ RowLabel(LOCTEXT("MHBoundLbl", "Bound actor:")) ]
+		+ SHorizontalBox::Slot().FillWidth(1.f).VAlign(VAlign_Center)
+		[
+			SAssignNew(MH_TargetStatusText, STextBlock)
+			.Text(LOCTEXT("MHNoActor", "No actor bound — select a MetaHuman and click Bind."))
+			.AutoWrapText(true)
+			.ColorAndOpacity(FSlateColor::UseSubduedForeground())
+		]
+	]
+	+ SVerticalBox::Slot().AutoHeight().Padding(0,0,0,6)
+	[
+		SNew(SHorizontalBox)
+		+ SHorizontalBox::Slot().AutoWidth()[ RowLabel(LOCTEXT("MHFaceLbl", "Face mesh:")) ]
+		+ SHorizontalBox::Slot().FillWidth(1.f).VAlign(VAlign_Center)
+		[
+			SAssignNew(MH_FaceMeshStatusText, STextBlock)
+			.Text(LOCTEXT("MHNoFace", "\u2014"))
+			.ColorAndOpacity(FSlateColor::UseSubduedForeground())
+		]
+	]
+
+	// ── AUDIO ASSET ─────────────────────────────────────────────────────────
+	+ SVerticalBox::Slot().AutoHeight().Padding(0,0,0,2)
+	[
+		SNew(STextBlock).Text(LOCTEXT("MHAudioSubHdr", "— AUDIO ASSET —"))
+			.Font(FCoreStyle::GetDefaultFontStyle("Bold", 9))
+			.ColorAndOpacity(FSlateColor::UseSubduedForeground())
+	]
+	+ SVerticalBox::Slot().AutoHeight().Padding(0,0,0,2)
+	[
+		SNew(SHorizontalBox)
+		+ SHorizontalBox::Slot().AutoWidth()
+		[ RowLabel(LOCTEXT("MHSwLbl", "SoundWave:")) ]
+		+ SHorizontalBox::Slot().FillWidth(1.f).VAlign(VAlign_Center)
+		[
+			SAssignNew(MH_SoundWaveStatusText, STextBlock)
+			.Text(LOCTEXT("MHNoSW", "Not imported yet."))
+			.AutoWrapText(true)
+			.ColorAndOpacity(FSlateColor::UseSubduedForeground())
+		]
+		+ SHorizontalBox::Slot().AutoWidth().Padding(6,0,0,0)
+		[
+			SNew(SButton)
+			.Text(LOCTEXT("MHImportBtn", "Import WAV as SoundWave"))
+			.ToolTipText(LOCTEXT("MHImportTip",
+				"Import the current WAV file into the content browser as a SoundWave asset\n"
+				"at /Game/EmotionBridge/Audio/.\n"
+				"Required for MetaHuman audio-driven facial animation.\n"
+				"Select a WAV file first (Audio File section above)."))
+			.IsEnabled_Lambda([this]
+			{
+				return !WavFilePath.IsEmpty() && FPaths::FileExists(WavFilePath);
+			})
+			.OnClicked(this, &SEmotionBridgePanel::OnImportSoundWave)
+		]
+	]
+
+	// ── EMOTION OVERLAY ──────────────────────────────────────────────────────
+	+ SVerticalBox::Slot().AutoHeight().Padding(0,4,0,2)
+	[
+		SNew(STextBlock).Text(LOCTEXT("MHOverlaySubHdr", "— EMOTION OVERLAY —"))
+			.Font(FCoreStyle::GetDefaultFontStyle("Bold", 9))
+			.ColorAndOpacity(FSlateColor::UseSubduedForeground())
+	]
+	// Overlay enabled toggle
+	+ SVerticalBox::Slot().AutoHeight().Padding(0,2)
+	[
+		SNew(SHorizontalBox)
+		+ SHorizontalBox::Slot().AutoWidth().Padding(0,0,8,0)
+		[
+			SNew(SCheckBox)
+			.IsChecked_Lambda([this]{ return bOverlayEnabled
+				? ECheckBoxState::Checked : ECheckBoxState::Unchecked; })
+			.OnCheckStateChanged_Lambda([this](ECheckBoxState S)
+			{ bOverlayEnabled = (S == ECheckBoxState::Checked); })
+		]
+		+ SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center)
+		[ SNew(STextBlock).Text(LOCTEXT("MHEnableOverlay", "Enable emotion overlay layer")) ]
+	]
+	// Blend duration
+	+ SVerticalBox::Slot().AutoHeight().Padding(0,2)
+	[
+		SNew(SHorizontalBox)
+		+ SHorizontalBox::Slot().AutoWidth()[ RowLabel(LOCTEXT("MHBlendLbl", "Blend duration (s):")) ]
+		+ SHorizontalBox::Slot().MaxWidth(80.f)
+		[
+			SNew(SEditableTextBox)
+			.Text_Lambda([this]
+			{ return FText::FromString(FString::Printf(TEXT("%.2f"), BlendDuration)); })
+			.ToolTipText(LOCTEXT("MHBlendTip",
+				"Crossfade duration between emotion segments.  0.4 s is a good default."))
+			.OnTextCommitted_Lambda([this](const FText& T, ETextCommit::Type)
+			{ BlendDuration = FMath::Clamp(FCString::Atof(*T.ToString()), 0.f, 5.f); })
+		]
+	]
+	// Confidence weighting toggle
+	+ SVerticalBox::Slot().AutoHeight().Padding(0,2)
+	[
+		SNew(SHorizontalBox)
+		+ SHorizontalBox::Slot().AutoWidth().Padding(0,0,8,0)
+		[
+			SNew(SCheckBox)
+			.IsChecked_Lambda([this]{ return bUseConfidenceAsWeight
+				? ECheckBoxState::Checked : ECheckBoxState::Unchecked; })
+			.OnCheckStateChanged_Lambda([this](ECheckBoxState S)
+			{ bUseConfidenceAsWeight = (S == ECheckBoxState::Checked); })
+		]
+		+ SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center)
+		[ SNew(STextBlock).Text(LOCTEXT("MHConfWeight",
+			"Use API confidence as intensity weight")) ]
+	]
+
+	// ── EMOTION INTENSITY ────────────────────────────────────────────────────
+	+ SVerticalBox::Slot().AutoHeight().Padding(0,4,0,2)
+	[
+		SNew(STextBlock).Text(LOCTEXT("MHIntensitySubHdr", "— EMOTION INTENSITY MULTIPLIERS —"))
+			.Font(FCoreStyle::GetDefaultFontStyle("Bold", 9))
+			.ColorAndOpacity(FSlateColor::UseSubduedForeground())
+	]
+	+ SVerticalBox::Slot().AutoHeight().Padding(0,0,0,2)
+	[
+		SNew(STextBlock)
+		.Text(LOCTEXT("MHIntensityDesc",
+			"Scale each emotion's expression strength [0 = off, 1 = normal, 2 = exaggerated]."))
+		.ColorAndOpacity(FSlateColor::UseSubduedForeground())
+		.AutoWrapText(true)
+	]
+
+	// Four emotion sliders — one per canonical emotion.
+	+ SVerticalBox::Slot().AutoHeight().Padding(0,2)
+	[
+		SNew(SHorizontalBox)
+		+ SHorizontalBox::Slot().AutoWidth()
+		[ SNew(SBox).WidthOverride(60.f).VAlign(VAlign_Center)
+		  [ SNew(STextBlock).Text(LOCTEXT("MHAngryLbl","angry:"))
+			.ColorAndOpacity(FSlateColor(FLinearColor(1.f,0.15f,0.15f))) ] ]
+		+ SHorizontalBox::Slot().MaxWidth(80.f)
+		[
+			SNew(SEditableTextBox)
+			.Text_Lambda([this]{ const float* V = EmotionIntensityMultipliers.Find(TEXT("angry"));
+				return FText::FromString(FString::Printf(TEXT("%.2f"), V ? *V : 1.f)); })
+			.OnTextCommitted_Lambda([this](const FText& T, ETextCommit::Type)
+			{ EmotionIntensityMultipliers.Add(TEXT("angry"),
+				FMath::Clamp(FCString::Atof(*T.ToString()),0.f,2.f)); })
+		]
+		+ SHorizontalBox::Slot().AutoWidth().Padding(12,0,0,0)
+		[ SNew(SBox).WidthOverride(60.f).VAlign(VAlign_Center)
+		  [ SNew(STextBlock).Text(LOCTEXT("MHHappyLbl","happy:"))
+			.ColorAndOpacity(FSlateColor(FLinearColor(1.f,0.85f,0.1f))) ] ]
+		+ SHorizontalBox::Slot().MaxWidth(80.f)
+		[
+			SNew(SEditableTextBox)
+			.Text_Lambda([this]{ const float* V = EmotionIntensityMultipliers.Find(TEXT("happy"));
+				return FText::FromString(FString::Printf(TEXT("%.2f"), V ? *V : 1.f)); })
+			.OnTextCommitted_Lambda([this](const FText& T, ETextCommit::Type)
+			{ EmotionIntensityMultipliers.Add(TEXT("happy"),
+				FMath::Clamp(FCString::Atof(*T.ToString()),0.f,2.f)); })
+		]
+		+ SHorizontalBox::Slot().AutoWidth().Padding(12,0,0,0)
+		[ SNew(SBox).WidthOverride(40.f).VAlign(VAlign_Center)
+		  [ SNew(STextBlock).Text(LOCTEXT("MHSadLbl","sad:"))
+			.ColorAndOpacity(FSlateColor(FLinearColor(0.25f,0.45f,1.f))) ] ]
+		+ SHorizontalBox::Slot().MaxWidth(80.f)
+		[
+			SNew(SEditableTextBox)
+			.Text_Lambda([this]{ const float* V = EmotionIntensityMultipliers.Find(TEXT("sad"));
+				return FText::FromString(FString::Printf(TEXT("%.2f"), V ? *V : 1.f)); })
+			.OnTextCommitted_Lambda([this](const FText& T, ETextCommit::Type)
+			{ EmotionIntensityMultipliers.Add(TEXT("sad"),
+				FMath::Clamp(FCString::Atof(*T.ToString()),0.f,2.f)); })
+		]
+		+ SHorizontalBox::Slot().AutoWidth().Padding(12,0,0,0)
+		[ SNew(SBox).WidthOverride(65.f).VAlign(VAlign_Center)
+		  [ SNew(STextBlock).Text(LOCTEXT("MHNeutralLbl","neutral:")) ] ]
+		+ SHorizontalBox::Slot().MaxWidth(80.f)
+		[
+			SNew(SEditableTextBox)
+			.Text_Lambda([this]{ const float* V = EmotionIntensityMultipliers.Find(TEXT("neutral"));
+				return FText::FromString(FString::Printf(TEXT("%.2f"), V ? *V : 1.f)); })
+			.OnTextCommitted_Lambda([this](const FText& T, ETextCommit::Type)
+			{ EmotionIntensityMultipliers.Add(TEXT("neutral"),
+				FMath::Clamp(FCString::Atof(*T.ToString()),0.f,2.f)); })
+		]
+	]
+
+	// ── LIVE PLAYBACK STATUS ─────────────────────────────────────────────────
+	+ SVerticalBox::Slot().AutoHeight().Padding(0,6,0,2)
+	[
+		SNew(STextBlock).Text(LOCTEXT("MHLiveSubHdr", "— CURRENT STATE —"))
+			.Font(FCoreStyle::GetDefaultFontStyle("Bold", 9))
+			.ColorAndOpacity(FSlateColor::UseSubduedForeground())
+	]
+	+ SVerticalBox::Slot().AutoHeight()
+	[
+		SNew(SHorizontalBox)
+		+ SHorizontalBox::Slot().AutoWidth()[ RowLabel(LOCTEXT("MHLiveLbl", "Emotion driver:")) ]
+		+ SHorizontalBox::Slot().FillWidth(1.f).VAlign(VAlign_Center)
+		[
+			SAssignNew(MH_LiveEmotionText, STextBlock)
+			.Text(LOCTEXT("MHLiveDefault", "\u2014"))
+			.ColorAndOpacity(FSlateColor::UseSubduedForeground())
+		]
+	];
+}
+
+// ============================================================================
+// Phase 2B — MetaHuman action callbacks
+// ============================================================================
+
+FReply SEmotionBridgePanel::OnBindSelectedActor()
+{
+	if (!GEditor)
+	{
+		SetStatus(TEXT("GEditor not available."), FLinearColor::Red);
+		return FReply::Handled();
+	}
+
+	// Get the first selected actor.
+	AActor* TargetActor = nullptr;
+	{
+		USelection* Sel = GEditor->GetSelectedActors();
+		if (!Sel || Sel->Num() == 0)
+		{
+			SetStatus(
+				TEXT("No actor selected. Select a MetaHuman actor in the viewport first."),
+				FLinearColor(1.f, 0.5f, 0.f));
+			return FReply::Handled();
+		}
+		TargetActor = Cast<AActor>(Sel->GetSelectedObject(0));
+	}
+
+	if (!TargetActor)
+	{
+		SetStatus(TEXT("Selected object is not an Actor."), FLinearColor(1.f, 0.5f, 0.f));
+		return FReply::Handled();
+	}
+
+	// Validate — must have at least one SkeletalMeshComponent.
+	TArray<USkeletalMeshComponent*> SkelComps;
+	TargetActor->GetComponents<USkeletalMeshComponent>(SkelComps);
+	if (SkelComps.IsEmpty())
+	{
+		SetStatus(
+			FString::Printf(TEXT("'%s' has no SkeletalMeshComponent. "
+				"Please select a MetaHuman actor."),
+				*TargetActor->GetActorLabel()),
+			FLinearColor::Red);
+		return FReply::Handled();
+	}
+
+	// Get or add UMetaHumanEmotionDriverComponent.
+	UMetaHumanEmotionDriverComponent* DriverComp =
+		TargetActor->FindComponentByClass<UMetaHumanEmotionDriverComponent>();
+
+	if (!DriverComp)
+	{
+		// Add as a transient instance component (session-only, not saved with the level).
+		DriverComp = NewObject<UMetaHumanEmotionDriverComponent>(
+			TargetActor,
+			UMetaHumanEmotionDriverComponent::StaticClass(),
+			NAME_None,
+			RF_Transient);
+		TargetActor->AddInstanceComponent(DriverComp);
+		DriverComp->RegisterComponent();
+		UE_LOG(LogEmotionBridge, Log,
+			TEXT("Phase2B: added UMetaHumanEmotionDriverComponent (transient) to '%s'."),
+			*TargetActor->GetActorLabel());
+	}
+
+	BoundMetaHumanActor = TargetActor;
+	BoundDriverComponent = DriverComp;
+	BoundActorLabel      = TargetActor->GetActorLabel();
+
+	UpdateMetaHumanTargetStatusUI();
+
+	const bool bHasFace = DriverComp->HasValidFaceMesh();
+	SetStatus(
+		FString::Printf(TEXT("Bound to '%s'. Face mesh: %s"),
+			*BoundActorLabel,
+			bHasFace
+				? TEXT("detected.")
+				: TEXT("not yet detected — will auto-detect on first Play Demo tick.")),
+		FLinearColor::Green);
+
+	return FReply::Handled();
+}
+
+FReply SEmotionBridgePanel::OnClearMetaHumanBinding()
+{
+	if (BoundDriverComponent.IsValid())
+	{
+		BoundDriverComponent->ResetToNeutral();
+	}
+	BoundMetaHumanActor.Reset();
+	BoundDriverComponent.Reset();
+	BoundActorLabel.Empty();
+
+	UpdateMetaHumanTargetStatusUI();
+	if (MH_LiveEmotionText.IsValid())
+		MH_LiveEmotionText->SetText(LOCTEXT("MHLiveDefault", "\u2014"));
+
+	SetStatus(TEXT("MetaHuman binding cleared."), FLinearColor::White);
+	return FReply::Handled();
+}
+
+FReply SEmotionBridgePanel::OnImportSoundWave()
+{
+	if (WavFilePath.IsEmpty() || !FPaths::FileExists(WavFilePath))
+	{
+		SetStatus(
+			TEXT("Select a WAV file first (Audio File section above)."),
+			FLinearColor(1.f, 0.5f, 0.f));
+		return FReply::Handled();
+	}
+
+	SetStatus(TEXT("Importing WAV as SoundWave..."), FLinearColor(1.f, 0.85f, 0.f));
+
+	FString ErrorMessage;
+	const FString ImportedPath = FEmotionAudioAssetHelper::ImportWavAsSoundWave(
+		WavFilePath,
+		FEmotionAudioAssetHelper::GetDefaultAudioContentPath(),
+		ErrorMessage);
+
+	if (ImportedPath.IsEmpty())
+	{
+		SetStatus(
+			FString::Printf(TEXT("SoundWave import failed: %s"), *ErrorMessage),
+			FLinearColor::Red);
+		return FReply::Handled();
+	}
+
+	SoundWaveAssetPath = ImportedPath;
+	UpdateSoundWaveStatusUI();
+
+	SetStatus(
+		FString::Printf(TEXT("SoundWave imported: %s"), *ImportedPath),
+		FLinearColor::Green);
+
+	UE_LOG(LogEmotionBridge, Log,
+		TEXT("Phase2B: SoundWave asset → '%s'"), *ImportedPath);
+	return FReply::Handled();
+}
+
+// ============================================================================
+// Phase 2B — UI update helpers
+// ============================================================================
+
+void SEmotionBridgePanel::UpdateMetaHumanTargetStatusUI()
+{
+	if (MH_TargetStatusText.IsValid())
+	{
+		MH_TargetStatusText->SetText(FText::FromString(
+			BoundActorLabel.IsEmpty()
+				? TEXT("No actor bound — select a MetaHuman and click Bind.")
+				: FString::Printf(TEXT("Bound: %s"), *BoundActorLabel)));
+		MH_TargetStatusText->SetColorAndOpacity(BoundActorLabel.IsEmpty()
+			? FSlateColor::UseSubduedForeground()
+			: FSlateColor(FLinearColor::Green));
+	}
+
+	if (MH_FaceMeshStatusText.IsValid())
+	{
+		FString FaceStatus = TEXT("\u2014");
+		if (BoundDriverComponent.IsValid())
+		{
+			FaceStatus = BoundDriverComponent->HasValidFaceMesh()
+				? TEXT("Detected")
+				: TEXT("Will auto-detect on first tick");
+		}
+		MH_FaceMeshStatusText->SetText(FText::FromString(FaceStatus));
+	}
+}
+
+void SEmotionBridgePanel::UpdateSoundWaveStatusUI()
+{
+	if (!MH_SoundWaveStatusText.IsValid()) return;
+
+	if (SoundWaveAssetPath.IsEmpty())
+	{
+		MH_SoundWaveStatusText->SetText(
+			LOCTEXT("MHNoSW", "Not imported yet."));
+		MH_SoundWaveStatusText->SetColorAndOpacity(FSlateColor::UseSubduedForeground());
+	}
+	else
+	{
+		MH_SoundWaveStatusText->SetText(FText::FromString(SoundWaveAssetPath));
+		MH_SoundWaveStatusText->SetColorAndOpacity(FSlateColor(FLinearColor::Green));
+	}
 }
 
 #undef LOCTEXT_NAMESPACE

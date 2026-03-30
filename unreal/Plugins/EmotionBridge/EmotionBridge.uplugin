@@ -3,7 +3,7 @@
 	"Version": 1,
 	"VersionName": "1.0",
 	"FriendlyName": "EmotionBridge",
-	"Description": "Connects Unreal Engine 5 to a local speech emotion recognition backend via HTTP. Provides a dockable editor tool for analyzing WAV files and driving actor color changes from an emotion timeline.",
+	"Description": "Connects Unreal Engine 5 to a local speech emotion recognition backend. Provides audio timeline analysis, a persistent Take Library, and MetaHuman facial emotion overlay (Phase 2B): import audio, bind a MetaHuman actor, and drive facial morph targets from the API emotion timeline with smooth blending.",
 	"Category": "Other",
 	"CreatedBy": "EmotionDemo",
 	"CreatedByURL": "",

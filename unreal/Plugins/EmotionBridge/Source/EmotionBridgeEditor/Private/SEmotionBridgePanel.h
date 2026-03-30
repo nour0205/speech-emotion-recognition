@@ -14,6 +14,7 @@
 
 class AEmotionLampActor;
 class SEmotionTakeLibrary; // Phase 2A — forward declaration
+class UMetaHumanEmotionDriverComponent; // Phase 2B — forward declaration
 
 // ---------------------------------------------------------------------------
 // Row data for the segment list view
@@ -46,6 +47,13 @@ struct FEmotionSegmentRow
  *   FindOrSpawnLampActor() searches the editor world first, then the PIE world.
  *   The lamp's OnConstruction() creates a DynamicMaterial so color changes are
  *   visible without PIE.
+ *
+ * PHASE 2B — METAHUMAN EMOTION OVERLAY:
+ *   The METAHUMAN FACE section lets the user:
+ *     1. Bind a MetaHuman actor (auto-adds UMetaHumanEmotionDriverComponent).
+ *     2. Import the WAV as a SoundWave content asset.
+ *     3. Toggle overlay, set blend duration and per-emotion intensity.
+ *   BroadcastEmotion() drives the bound driver each frame during playback.
  */
 class SEmotionBridgePanel : public SCompoundWidget
 {
@@ -131,6 +139,7 @@ private:
 	TSharedRef<SWidget> BuildPlaybackSection();
 	TSharedRef<SWidget> BuildSaveTakeSection();     // Phase 2A
 	TSharedRef<SWidget> BuildTakeLibrarySection();  // Phase 2A
+	TSharedRef<SWidget> BuildMetaHumanSection();    // Phase 2B
 
 	// -----------------------------------------------------------------------
 	// Button callbacks
@@ -145,6 +154,11 @@ private:
 	FReply OnFocusViewport();
 	FReply OnSaveTakeClicked(); // Phase 2A
 
+	// Phase 2B
+	FReply OnBindSelectedActor();
+	FReply OnClearMetaHumanBinding();
+	FReply OnImportSoundWave();
+
 	// -----------------------------------------------------------------------
 	// Internal
 	// -----------------------------------------------------------------------
@@ -158,6 +172,7 @@ private:
 	 * Apply the given emotion to ALL targets in the editor world:
 	 *  1. Every actor that has a UEmotionColorComponent.
 	 *  2. The AEmotionLampActor reference (if still valid).
+	 *  3. The bound UMetaHumanEmotionDriverComponent (Phase 2B).
 	 * Call this instead of LampActorRef->ApplyEmotion() directly.
 	 */
 	void BroadcastEmotion(const FString& Emotion, float Confidence);
@@ -220,4 +235,51 @@ private:
 
 	/** The embedded Take Library widget. */
 	TSharedPtr<SEmotionTakeLibrary> TakeLibraryWidget;
+
+	// -----------------------------------------------------------------------
+	// Phase 2B state — MetaHuman emotion overlay
+	// -----------------------------------------------------------------------
+
+	/** The MetaHuman actor currently bound for emotion overlay. */
+	TWeakObjectPtr<AActor> BoundMetaHumanActor;
+
+	/**
+	 * The UMetaHumanEmotionDriverComponent on the bound actor.
+	 * Auto-added by OnBindSelectedActor() if the actor doesn't already have one.
+	 */
+	TWeakObjectPtr<UMetaHumanEmotionDriverComponent> BoundDriverComponent;
+
+	/** Display label of the currently bound actor (used for UI and take save). */
+	FString BoundActorLabel;
+
+	/**
+	 * Content-browser path to the SoundWave asset imported from WavFilePath.
+	 * Example: "/Game/EmotionBridge/Audio/MySpeech"
+	 * Populated by OnImportSoundWave() and saved in the take Phase2B record.
+	 */
+	FString SoundWaveAssetPath;
+
+	/** Whether the emotion overlay layer is enabled (written to driver settings on play). */
+	bool  bOverlayEnabled = true;
+
+	/** Blend transition duration in seconds (written to driver settings on play). */
+	float BlendDuration = 0.4f;
+
+	/** Whether the driver should use API confidence as an intensity multiplier. */
+	bool  bUseConfidenceAsWeight = true;
+
+	/** Per-emotion intensity multipliers driven by the slider widgets. */
+	TMap<FString, float> EmotionIntensityMultipliers;
+
+	// Phase 2B widget references
+	TSharedPtr<STextBlock> MH_TargetStatusText;   // "Bound to: X" or "No actor bound"
+	TSharedPtr<STextBlock> MH_FaceMeshStatusText; // "Face mesh: detected / not found"
+	TSharedPtr<STextBlock> MH_SoundWaveStatusText;// SoundWave import status
+	TSharedPtr<STextBlock> MH_LiveEmotionText;    // current emotion + blend alpha (during play)
+
+	/** Update the MetaHuman target status text widgets after binding/clearing. */
+	void UpdateMetaHumanTargetStatusUI();
+
+	/** Update the SoundWave status text after import or take load. */
+	void UpdateSoundWaveStatusUI();
 };
