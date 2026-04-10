@@ -34,3 +34,11 @@ unreal/**/Intermediate/
 unreal/**/Binaries/
 unreal/EmotionDemo (Mac).xcworkspace/
 unreal/EmotionDemo (Mac).xcworkspace/xcuserdata/
+unreal/.vs/
+unreal/.vsconfig
+unreal/EmotionDemo.sln
+unreal/Backup/
+unreal/UpgradeLog.htm
+
+# Claude Code
+.claude/
