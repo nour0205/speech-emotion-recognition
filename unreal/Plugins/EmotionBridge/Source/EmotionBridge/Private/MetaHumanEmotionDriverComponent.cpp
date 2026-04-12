@@ -259,37 +259,38 @@ TArray<FEmotionExpressionPreset> UMetaHumanEmotionDriverComponent::MakeDefaultPr
 
 	// ─── ANGRY ───────────────────────────────────────────────────────────────
 	// Furrowed brows, eye squint, nose wrinkle.  No jaw / no lips.
+	// Target names use Amelia's head_lod0_mesh__ prefix + snake_case convention.
 	Presets.Add(MakePreset(TEXT("angry"), {
-		{ TEXT("browDown_L"),    0.65f },
-		{ TEXT("browDown_R"),    0.65f },
-		{ TEXT("eyeSquint_L"),   0.35f },
-		{ TEXT("eyeSquint_R"),   0.35f },
-		{ TEXT("noseSneer_L"),   0.30f },
-		{ TEXT("noseSneer_R"),   0.30f },
+		{ TEXT("head_lod0_mesh__brow_down_L"),  0.65f },
+		{ TEXT("head_lod0_mesh__brow_down_R"),  0.65f },
+		{ TEXT("head_lod0_mesh__eye_squint_L"), 0.35f },
+		{ TEXT("head_lod0_mesh__eye_squint_R"), 0.35f },
+		{ TEXT("head_lod0_mesh__nose_sneer_L"), 0.30f },
+		{ TEXT("head_lod0_mesh__nose_sneer_R"), 0.30f },
 	}, 1.0f));
 
 	// ─── HAPPY ───────────────────────────────────────────────────────────────
 	// Raised cheeks, smile squint, light brow lift.  Mouth corners subtle.
 	Presets.Add(MakePreset(TEXT("happy"), {
-		{ TEXT("cheekSquint_L"), 0.55f },
-		{ TEXT("cheekSquint_R"), 0.55f },
-		{ TEXT("eyeSquint_L"),   0.30f },
-		{ TEXT("eyeSquint_R"),   0.30f },
-		{ TEXT("mouthSmile_L"),  0.40f },
-		{ TEXT("mouthSmile_R"),  0.40f },
-		{ TEXT("browInnerUp"),   0.10f },
+		{ TEXT("head_lod0_mesh__cheek_squint_L"), 0.55f },
+		{ TEXT("head_lod0_mesh__cheek_squint_R"), 0.55f },
+		{ TEXT("head_lod0_mesh__eye_squint_L"),   0.30f },
+		{ TEXT("head_lod0_mesh__eye_squint_R"),   0.30f },
+		{ TEXT("head_lod0_mesh__mouth_smile_L"),  0.40f },
+		{ TEXT("head_lod0_mesh__mouth_smile_R"),  0.40f },
+		{ TEXT("head_lod0_mesh__brow_inner_up"),  0.10f },
 	}, 1.0f));
 
 	// ─── SAD ─────────────────────────────────────────────────────────────────
 	// Inner brow raise (pleading arch), slight wide eyes, downturn corners.
 	Presets.Add(MakePreset(TEXT("sad"), {
-		{ TEXT("browInnerUp"),   0.55f },
-		{ TEXT("browDown_L"),    0.20f },
-		{ TEXT("browDown_R"),    0.20f },
-		{ TEXT("eyeWide_L"),     0.15f },
-		{ TEXT("eyeWide_R"),     0.15f },
-		{ TEXT("mouthFrown_L"),  0.40f },
-		{ TEXT("mouthFrown_R"),  0.40f },
+		{ TEXT("head_lod0_mesh__brow_inner_up"),  0.55f },
+		{ TEXT("head_lod0_mesh__brow_down_L"),    0.20f },
+		{ TEXT("head_lod0_mesh__brow_down_R"),    0.20f },
+		{ TEXT("head_lod0_mesh__eye_wide_L"),     0.15f },
+		{ TEXT("head_lod0_mesh__eye_wide_R"),     0.15f },
+		{ TEXT("head_lod0_mesh__mouth_frown_L"),  0.40f },
+		{ TEXT("head_lod0_mesh__mouth_frown_R"),  0.40f },
 	}, 1.0f));
 
 	// ─── NEUTRAL ─────────────────────────────────────────────────────────────
