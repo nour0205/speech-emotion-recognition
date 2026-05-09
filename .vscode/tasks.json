@@ -1,0 +1,308 @@
+{
+	"version": "2.0.0",
+	"options": {
+		"shell": {
+			"executable": "C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe",
+			"args": [
+				"-NoProfile",
+				"-Command"
+			]
+		}
+	},
+	"tasks": [
+		{
+			"label": "Run SER API (Python .venv)",
+			"type": "shell",
+			"command": ".\\.venv\\Scripts\\python.exe",
+			"options": {
+				"env": {
+					"PYTHONPATH": "src"
+				}
+			},
+			"args": [
+				"-m",
+				"uvicorn",
+				"src.api.main:app",
+				"--host",
+				"0.0.0.0",
+				"--port",
+				"8000",
+				"--reload"
+			],
+			"isBackground": true
+		},
+		{
+			"label": "Check WSL status",
+			"type": "shell",
+			"command": "wsl",
+			"args": [
+				"--status"
+			]
+		},
+		{
+			"label": "List WSL distros",
+			"type": "shell",
+			"command": "wsl",
+			"args": [
+				"-l",
+				"-v"
+			]
+		},
+		{
+			"label": "Check WSL status (PowerShell shell)",
+			"type": "shell",
+			"command": "wsl",
+			"args": [
+				"--status"
+			]
+		},
+		{
+			"label": "List WSL distros (PowerShell shell)",
+			"type": "shell",
+			"command": "wsl",
+			"args": [
+				"-l",
+				"-v"
+			]
+		},
+		{
+			"label": "Install Ubuntu WSL distro",
+			"type": "shell",
+			"command": "wsl",
+			"args": [
+				"--install",
+				"-d",
+				"Ubuntu"
+			]
+		},
+		{
+			"label": "Set default WSL distro Ubuntu",
+			"type": "shell",
+			"command": "wsl",
+			"args": [
+				"--set-default",
+				"Ubuntu"
+			]
+		},
+		{
+			"label": "Install Ubuntu WSL distro",
+			"type": "shell",
+			"command": "wsl",
+			"args": [
+				"--install",
+				"-d",
+				"Ubuntu"
+			]
+		},
+		{
+			"label": "Set default WSL distro Ubuntu",
+			"type": "shell",
+			"command": "wsl",
+			"args": [
+				"--set-default",
+				"Ubuntu"
+			]
+		},
+		{
+			"label": "List WSL distros (PowerShell shell)",
+			"type": "shell",
+			"command": "wsl",
+			"args": [
+				"-l",
+				"-v"
+			]
+		},
+		{
+			"label": "Check PowerShell execution policy",
+			"type": "shell",
+			"command": "Get-ExecutionPolicy",
+			"args": [
+				"-List"
+			]
+		},
+		{
+			"label": "Set execution policy current user",
+			"type": "shell",
+			"command": "Set-ExecutionPolicy",
+			"args": [
+				"-Scope",
+				"CurrentUser",
+				"-ExecutionPolicy",
+				"RemoteSigned",
+				"-Force"
+			]
+		},
+		{
+			"label": "Verify execution policy",
+			"type": "shell",
+			"command": "Get-ExecutionPolicy",
+			"args": [
+				"-List"
+			]
+		},
+		{
+			"label": "Test venv activation",
+			"type": "shell",
+			"command": "Set-Location \"e:\\Vortrix's Projects\\ISS\\speech-emotion-recognition\"; & \".\\.venv\\Scripts\\Activate.ps1\"; python --version"
+		},
+		{
+			"label": "Test venv activation simple",
+			"type": "shell",
+			"command": "& \".\\.venv\\Scripts\\Activate.ps1\"; python --version"
+		},
+		{
+			"label": "Check listener on 8000",
+			"type": "shell",
+			"command": "netstat",
+			"args": [
+				"-ano",
+				"|",
+				"findstr",
+				":8000"
+			]
+		},
+		{
+			"label": "Check TCP excluded ranges",
+			"type": "shell",
+			"command": "netsh",
+			"args": [
+				"interface",
+				"ipv4",
+				"show",
+				"excludedportrange",
+				"protocol=tcp"
+			]
+		},
+		{
+			"label": "Check HTTP URL ACL",
+			"type": "shell",
+			"command": "netsh",
+			"args": [
+				"http",
+				"show",
+				"urlacl"
+			]
+		},
+		{
+			"label": "Identify PID 16416",
+			"type": "shell",
+			"command": "Get-Process",
+			"args": [
+				"-Id",
+				"16416",
+				"|",
+				"Select-Object",
+				"Id,ProcessName,Path"
+			]
+		},
+		{
+			"label": "Stop PID 16416",
+			"type": "shell",
+			"command": "Stop-Process",
+			"args": [
+				"-Id",
+				"16416",
+				"-Force"
+			]
+		},
+		{
+			"label": "Verify port 8000 free",
+			"type": "shell",
+			"command": "netstat",
+			"args": [
+				"-ano",
+				"|",
+				"findstr",
+				":8000"
+			]
+		},
+		{
+			"label": "Start API on 8000",
+			"type": "shell",
+			"command": "& \".\\.venv\\Scripts\\python.exe\"",
+			"args": [
+				"-m",
+				"uvicorn",
+				"src.api.main:app",
+				"--reload",
+				"--host",
+				"0.0.0.0",
+				"--port",
+				"8000"
+			],
+			"isBackground": true
+		},
+		{
+			"label": "Start API on 8000 (fixed)",
+			"type": "shell",
+			"command": ".\\.venv\\Scripts\\python.exe",
+			"args": [
+				"-m",
+				"uvicorn",
+				"src.api.main:app",
+				"--reload",
+				"--host",
+				"0.0.0.0",
+				"--port",
+				"8000"
+			],
+			"isBackground": true
+		},
+		{
+			"label": "Check API health 8000",
+			"type": "shell",
+			"command": "Invoke-WebRequest",
+			"args": [
+				"-UseBasicParsing",
+				"http://localhost:8000/health"
+			]
+		},
+		{
+			"label": "Start API with PYTHONPATH",
+			"type": "shell",
+			"command": "$env:PYTHONPATH='src'; .\\.venv\\Scripts\\python.exe -m uvicorn src.api.main:app --reload --host 0.0.0.0 --port 8000",
+			"isBackground": true
+		},
+		{
+			"label": "Health check after relaunch",
+			"type": "shell",
+			"command": "Invoke-WebRequest",
+			"args": [
+				"-UseBasicParsing",
+				"http://localhost:8000/health"
+			]
+		},
+		{
+			"label": "Check 8000 listener now",
+			"type": "shell",
+			"command": "netstat",
+			"args": [
+				"-ano",
+				"|",
+				"findstr",
+				":8000"
+			]
+		},
+		{
+			"label": "List python processes",
+			"type": "shell",
+			"command": "Get-Process",
+			"args": [
+				"python",
+				"|",
+				"Select-Object",
+				"Id,ProcessName,Path"
+			]
+		},
+		{
+			"label": "Health check with timeout",
+			"type": "shell",
+			"command": "$ProgressPreference='SilentlyContinue'; try { $r = Invoke-WebRequest -UseBasicParsing -TimeoutSec 30 http://127.0.0.1:8000/health; Write-Output $r.StatusCode; Write-Output $r.Content } catch { Write-Output $_.Exception.Message; exit 1 }"
+		},
+		{
+			"label": "Health check final",
+			"type": "shell",
+			"command": "$ProgressPreference='SilentlyContinue'; (Invoke-WebRequest -UseBasicParsing -TimeoutSec 10 http://127.0.0.1:8000/health).Content"
+		}
+	]
+}

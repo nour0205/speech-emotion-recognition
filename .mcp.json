@@ -1,0 +1,19 @@
+{
+  "mcpServers": {
+    "filesystem": {
+      "command": "npx",
+      "args": ["-y", "@modelcontextprotocol/server-filesystem", "."],
+      "description": "Full read/write access to project files"
+    },
+    "shell": {
+      "command": "npx",
+      "args": ["-y", "mcp-shell"],
+      "description": "Run build commands, start the emotion API, run tests (third-party mcp-shell package; official @modelcontextprotocol/server-shell does not exist)"
+    },
+    "memory": {
+      "command": "npx",
+      "args": ["-y", "@modelcontextprotocol/server-memory"],
+      "description": "Persistent memory across sessions for architecture decisions"
+    }
+  }
+}
