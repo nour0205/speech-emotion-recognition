@@ -15,6 +15,10 @@
 class AEmotionLampActor;
 class SEmotionTakeLibrary; // Phase 2A — forward declaration
 class UMetaHumanEmotionDriverComponent; // Phase 2B — forward declaration
+class ULevelSequence;      // Sequencer Bake — forward declaration
+class UAnimSequence;       // Sequencer Bake — forward declaration
+class ULevelSequencePlayer; // M5 — editor-world sequence playback
+class ALevelSequenceActor;  // M5 — editor-world sequence playback
 
 // ---------------------------------------------------------------------------
 // Row data for the segment list view
@@ -140,6 +144,7 @@ private:
 	TSharedRef<SWidget> BuildSaveTakeSection();     // Phase 2A
 	TSharedRef<SWidget> BuildTakeLibrarySection();  // Phase 2A
 	TSharedRef<SWidget> BuildMetaHumanSection();    // Phase 2B
+	TSharedRef<SWidget> BuildSequencerExportSection(); // Sequencer Bake
 
 	// -----------------------------------------------------------------------
 	// Button callbacks
@@ -158,6 +163,12 @@ private:
 	FReply OnBindSelectedActor();
 	FReply OnClearMetaHumanBinding();
 	FReply OnImportSoundWave();
+
+	// Sequencer Bake
+	FReply OnBakeAndExport();
+	FReply OnOpenBoundSequence();
+	// M5 — play the bound Level Sequence in the editor world, no Sequencer UI.
+	FReply OnPlayBoundSequence();
 
 	// -----------------------------------------------------------------------
 	// Internal
@@ -190,6 +201,18 @@ private:
 	TSharedRef<ITableRow> GenerateSegmentRow(
 		TSharedPtr<FEmotionSegmentRow> Item,
 		const TSharedRef<STableViewBase>& OwnerTable);
+
+	/**
+	 * Single entry point for user-driven WAV path changes (file picker,
+	 * recording, panel text edit, take loads).  When the path actually
+	 * changes, invalidates the Face AnimSequence picker AND the imported
+	 * SoundWave reference so a new audio source can't be silently baked
+	 * against stale lip-sync / SoundWave assets.
+	 *
+	 * Take loads should pass bIsTakeLoad=true so the take's stored
+	 * SoundWaveAssetPath survives the auto-clear.
+	 */
+	void SetCurrentWavPath(const FString& NewPath, bool bIsTakeLoad = false);
 
 	FSlateColor GetSlateColorForEmotion(const FString& Emotion) const;
 
@@ -276,6 +299,34 @@ private:
 	TSharedPtr<STextBlock> MH_FaceMeshStatusText; // "Face mesh: detected / not found"
 	TSharedPtr<STextBlock> MH_SoundWaveStatusText;// SoundWave import status
 	TSharedPtr<STextBlock> MH_LiveEmotionText;    // current emotion + blend alpha (during play)
+
+	// -----------------------------------------------------------------------
+	// Sequencer Bake state
+	// -----------------------------------------------------------------------
+	/**
+	 * Level Sequence the user has bound to receive baked audio + face anim.
+	 * Picked once via the asset picker; reused across every Bake & Export.
+	 */
+	TSoftObjectPtr<ULevelSequence> BoundLevelSequence;
+
+	/**
+	 * AnimSequence produced by MetaHuman Performance for the current take.
+	 * The user generates this manually (right-click WAV → MetaHuman Performance
+	 * → Process and Export to Anim Sequence) and picks the result here so we
+	 * can bake emotion control curves on top of its lip-sync curves.
+	 */
+	TSoftObjectPtr<UAnimSequence> BoundFaceAnimSequence;
+
+	/** Status line for the Sequencer Bake section. */
+	TSharedPtr<STextBlock> SeqBakeStatusText;
+
+	/**
+	 * M5 — transient Level Sequence player spawned by OnPlayBoundSequence().
+	 * Cached so repeated clicks stop the previous instance instead of
+	 * stacking actors in the editor world.
+	 */
+	TWeakObjectPtr<ULevelSequencePlayer> ActiveSequencePlayer;
+	TWeakObjectPtr<ALevelSequenceActor>  ActiveSequenceActor;
 
 	/** Update the MetaHuman target status text widgets after binding/clearing. */
 	void UpdateMetaHumanTargetStatusUI();

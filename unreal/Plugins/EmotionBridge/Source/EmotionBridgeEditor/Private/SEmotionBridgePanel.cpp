@@ -12,6 +12,29 @@
 // Phase 2B
 #include "MetaHumanEmotionDriverComponent.h"
 #include "EmotionAudioAssetHelper.h"
+// Sequencer Bake
+#include "EmotionAnimSequenceBaker.h"
+#include "EmotionSequenceExporter.h"
+#include "EmotionPerformanceRunner.h"       // Phase B: drive MetaHuman Performance from C++
+#include "PropertyCustomizationHelpers.h"   // SObjectPropertyEntryBox
+#include "LevelSequence.h"
+#include "LevelSequenceActor.h"             // M5: ALevelSequenceActor
+#include "LevelSequencePlayer.h"            // M5: ULevelSequencePlayer + FMovieSceneSequencePlaybackSettings
+// Phase B: ULevelSequenceFactoryNew lives in LevelSequenceEditor's Private/
+// Factories folder (not includable).  We replicate its FactoryCreateNew body
+// inline (NewObject<ULevelSequence> + ULevelSequence::Initialize()), which is
+// exactly what Epic's factory does — see LevelSequenceFactoryNew.cpp.
+#include "MovieScene.h"                     // Phase B: UMovieScene for default frame ranges
+#include "Animation/AnimSequence.h"
+#include "Sound/SoundBase.h"
+#include "Sound/SoundWave.h"                // Phase B: USoundWave for Performance input
+#include "Components/SkeletalMeshComponent.h" // Phase B: face mesh resolution
+#include "Engine/SkeletalMesh.h"             // Phase B: USkeletalMesh
+#include "AssetRegistry/AssetData.h"
+#include "AssetRegistry/AssetRegistryModule.h" // Phase B: FAssetRegistryModule::AssetCreated
+#include "AssetToolsModule.h"                  // Phase B: IAssetTools (asset name uniqueness helpers)
+#include "IAssetTools.h"
+#include "Subsystems/AssetEditorSubsystem.h"
 
 // Slate
 #include "Widgets/SBoxPanel.h"
@@ -19,6 +42,7 @@
 #include "Widgets/Layout/SScrollBox.h"
 #include "Widgets/Layout/SSeparator.h"
 #include "Widgets/Layout/SBox.h"
+#include "Widgets/Layout/SExpandableArea.h"
 #include "Widgets/Text/STextBlock.h"
 #include "Widgets/Input/SButton.h"
 #include "Widgets/Input/SEditableTextBox.h"
@@ -127,14 +151,34 @@ void SEmotionBridgePanel::Construct(const FArguments& InArgs)
 				]
 			]
 
-			+ SVerticalBox::Slot().AutoHeight().Padding(0,0,0,6) [ BuildBackendSection() ]
-			+ SVerticalBox::Slot().AutoHeight().Padding(0,2)     [ SNew(SSeparator) ]
-			+ SVerticalBox::Slot().AutoHeight().Padding(0,6,0,6) [ BuildFileSection() ]
-			+ SVerticalBox::Slot().AutoHeight().Padding(0,2)     [ SNew(SSeparator) ]
-			+ SVerticalBox::Slot().AutoHeight().Padding(0,6,0,6) [ BuildParametersSection() ]
-			+ SVerticalBox::Slot().AutoHeight().Padding(0,2)     [ SNew(SSeparator) ]
+			// Each section is wrapped in SExpandableArea so the user can
+			// collapse parts of the panel that aren't in active use.
+			// InitiallyCollapsed defaults reflect a "analyze → play" workflow:
+			//   open: Backend, Audio, Results, Playback
+			//   closed: Parameters, Save Take, Take Library, MetaHuman, Sequencer Export
+			+ SVerticalBox::Slot().AutoHeight().Padding(0,2)
+			[
+				SNew(SExpandableArea)
+				.InitiallyCollapsed(false)
+				.AreaTitle(LOCTEXT("BackendHdr", "BACKEND"))
+				.BodyContent() [ BuildBackendSection() ]
+			]
+			+ SVerticalBox::Slot().AutoHeight().Padding(0,2)
+			[
+				SNew(SExpandableArea)
+				.InitiallyCollapsed(false)
+				.AreaTitle(LOCTEXT("FileHdr", "AUDIO FILE"))
+				.BodyContent() [ BuildFileSection() ]
+			]
+			+ SVerticalBox::Slot().AutoHeight().Padding(0,2)
+			[
+				SNew(SExpandableArea)
+				.InitiallyCollapsed(true)
+				.AreaTitle(LOCTEXT("ParamsHdr", "TIMELINE PARAMETERS  (sent to /timeline/unreal)"))
+				.BodyContent() [ BuildParametersSection() ]
+			]
 
-			// Analyze button
+			// Analyze button — always visible, not inside any collapsible.
 			+ SVerticalBox::Slot().AutoHeight().Padding(0,8)
 			[
 				SNew(SButton)
@@ -146,16 +190,48 @@ void SEmotionBridgePanel::Construct(const FArguments& InArgs)
 				.OnClicked(this, &SEmotionBridgePanel::OnAnalyze)
 			]
 
-			+ SVerticalBox::Slot().AutoHeight().Padding(0,2)     [ SNew(SSeparator) ]
-			+ SVerticalBox::Slot().AutoHeight().Padding(0,6,0,6) [ BuildResultsSection() ]
-			+ SVerticalBox::Slot().AutoHeight().Padding(0,2)     [ SNew(SSeparator) ]
-			+ SVerticalBox::Slot().AutoHeight().Padding(0,6,0,6) [ BuildPlaybackSection() ]
-			+ SVerticalBox::Slot().AutoHeight().Padding(0,2)     [ SNew(SSeparator) ]
-			+ SVerticalBox::Slot().AutoHeight().Padding(0,6,0,6) [ BuildSaveTakeSection() ]
-			+ SVerticalBox::Slot().AutoHeight().Padding(0,2)     [ SNew(SSeparator) ]
-			+ SVerticalBox::Slot().AutoHeight().Padding(0,6,0,8) [ BuildTakeLibrarySection() ]
-			+ SVerticalBox::Slot().AutoHeight().Padding(0,2)     [ SNew(SSeparator) ]
-			+ SVerticalBox::Slot().AutoHeight().Padding(0,6,0,8) [ BuildMetaHumanSection() ] // Phase 2B
+			+ SVerticalBox::Slot().AutoHeight().Padding(0,2)
+			[
+				SNew(SExpandableArea)
+				.InitiallyCollapsed(false)
+				.AreaTitle(LOCTEXT("ResultsHdr", "RESULTS"))
+				.BodyContent() [ BuildResultsSection() ]
+			]
+			+ SVerticalBox::Slot().AutoHeight().Padding(0,2)
+			[
+				SNew(SExpandableArea)
+				.InitiallyCollapsed(false)
+				.AreaTitle(LOCTEXT("PlayHdr", "PLAYBACK DEMO"))
+				.BodyContent() [ BuildPlaybackSection() ]
+			]
+			+ SVerticalBox::Slot().AutoHeight().Padding(0,2)
+			[
+				SNew(SExpandableArea)
+				.InitiallyCollapsed(true)
+				.AreaTitle(LOCTEXT("SaveTakeHdr", "SAVE TAKE"))
+				.BodyContent() [ BuildSaveTakeSection() ]
+			]
+			+ SVerticalBox::Slot().AutoHeight().Padding(0,2)
+			[
+				SNew(SExpandableArea)
+				.InitiallyCollapsed(true)
+				.AreaTitle(LOCTEXT("TakeLibHdr", "TAKE LIBRARY"))
+				.BodyContent() [ BuildTakeLibrarySection() ]
+			]
+			+ SVerticalBox::Slot().AutoHeight().Padding(0,2)
+			[
+				SNew(SExpandableArea)
+				.InitiallyCollapsed(true)
+				.AreaTitle(LOCTEXT("MHHdr", "METAHUMAN FACE  (Phase 2B)"))
+				.BodyContent() [ BuildMetaHumanSection() ]
+			]
+			+ SVerticalBox::Slot().AutoHeight().Padding(0,2)
+			[
+				SNew(SExpandableArea)
+				.InitiallyCollapsed(true)
+				.AreaTitle(LOCTEXT("SeqHeader", "SEQUENCER EXPORT"))
+				.BodyContent() [ BuildSequencerExportSection() ]
+			]
 		]
 	];
 }
@@ -169,6 +245,21 @@ SEmotionBridgePanel::~SEmotionBridgePanel()
 		AudioCapture->StopStream();
 		AudioCapture->CloseStream();
 		AudioCapture.Reset();
+	}
+
+	// M5 — tear down the transient Level Sequence player, if any.
+	if (ActiveSequencePlayer.IsValid())
+	{
+		ActiveSequencePlayer->Stop();
+		ActiveSequencePlayer.Reset();
+	}
+	if (ActiveSequenceActor.IsValid())
+	{
+		if (ALevelSequenceActor* OldActor = ActiveSequenceActor.Get())
+		{
+			OldActor->Destroy();
+		}
+		ActiveSequenceActor.Reset();
 	}
 }
 
@@ -267,11 +358,6 @@ TSharedRef<SWidget> SEmotionBridgePanel::BuildBackendSection()
 	const FString DefaultUrl = S ? S->ApiBaseUrl : TEXT("http://localhost:8000");
 
 	return SNew(SVerticalBox)
-		+ SVerticalBox::Slot().AutoHeight().Padding(0,0,0,4)
-		[
-			SNew(STextBlock).Text(LOCTEXT("BackendHdr", "BACKEND"))
-				.Font(FCoreStyle::GetDefaultFontStyle("Bold", 10))
-		]
 		+ SVerticalBox::Slot().AutoHeight()
 		[
 			SNew(SHorizontalBox)
@@ -297,11 +383,6 @@ TSharedRef<SWidget> SEmotionBridgePanel::BuildBackendSection()
 TSharedRef<SWidget> SEmotionBridgePanel::BuildFileSection()
 {
 	return SNew(SVerticalBox)
-		+ SVerticalBox::Slot().AutoHeight().Padding(0,0,0,4)
-		[
-			SNew(STextBlock).Text(LOCTEXT("FileHdr", "AUDIO FILE"))
-				.Font(FCoreStyle::GetDefaultFontStyle("Bold", 10))
-		]
 		// WAV picker
 		+ SVerticalBox::Slot().AutoHeight().Padding(0,0,0,4)
 		[
@@ -313,7 +394,7 @@ TSharedRef<SWidget> SEmotionBridgePanel::BuildFileSection()
 				SAssignNew(WavPathBox, SEditableTextBox)
 				.HintText(LOCTEXT("WavHint", "/absolute/path/to/audio.wav"))
 				.OnTextCommitted_Lambda([this](const FText& T, ETextCommit::Type)
-				{ WavFilePath = T.ToString(); })
+				{ SetCurrentWavPath(T.ToString()); })
 			]
 			+ SHorizontalBox::Slot().AutoWidth().Padding(6,0,0,0)
 			[
@@ -348,12 +429,6 @@ TSharedRef<SWidget> SEmotionBridgePanel::BuildFileSection()
 TSharedRef<SWidget> SEmotionBridgePanel::BuildParametersSection()
 {
 	return SNew(SVerticalBox)
-		+ SVerticalBox::Slot().AutoHeight().Padding(0,0,0,4)
-		[
-			SNew(STextBlock)
-			.Text(LOCTEXT("ParamsHdr", "TIMELINE PARAMETERS  (sent to /timeline/unreal)"))
-			.Font(FCoreStyle::GetDefaultFontStyle("Bold", 10))
-		]
 		// Row 1: window + hop
 		+ SVerticalBox::Slot().AutoHeight().Padding(0,2)
 		[
@@ -463,11 +538,6 @@ TSharedRef<SWidget> SEmotionBridgePanel::BuildResultsSection()
 	return SNew(SVerticalBox)
 		+ SVerticalBox::Slot().AutoHeight().Padding(0,0,0,4)
 		[
-			SNew(STextBlock).Text(LOCTEXT("ResultsHdr","RESULTS"))
-				.Font(FCoreStyle::GetDefaultFontStyle("Bold", 10))
-		]
-		+ SVerticalBox::Slot().AutoHeight().Padding(0,0,0,4)
-		[
 			SAssignNew(MetadataText, STextBlock)
 			.Text(LOCTEXT("NoResults","No results yet. Run Analyze."))
 			.AutoWrapText(true)
@@ -486,11 +556,6 @@ TSharedRef<SWidget> SEmotionBridgePanel::BuildResultsSection()
 TSharedRef<SWidget> SEmotionBridgePanel::BuildPlaybackSection()
 {
 	return SNew(SVerticalBox)
-		+ SVerticalBox::Slot().AutoHeight().Padding(0,0,0,4)
-		[
-			SNew(STextBlock).Text(LOCTEXT("PlayHdr","PLAYBACK DEMO"))
-				.Font(FCoreStyle::GetDefaultFontStyle("Bold", 10))
-		]
 		+ SVerticalBox::Slot().AutoHeight().Padding(0,0,0,4)
 		[
 			SNew(STextBlock)
@@ -608,8 +673,7 @@ FReply SEmotionBridgePanel::OnBrowseWav()
 		TEXT("WAV Audio (*.wav)|*.wav|All Files (*.*)|*.*"),
 		EFileDialogFlags::None, Files) && Files.Num() > 0)
 	{
-		WavFilePath = Files[0];
-		if (WavPathBox.IsValid()) WavPathBox->SetText(FText::FromString(WavFilePath));
+		SetCurrentWavPath(Files[0]);
 	}
 	return FReply::Handled();
 }
@@ -670,8 +734,7 @@ FReply SEmotionBridgePanel::OnRecordStop()
 	const FString Path = WriteRecordingToWav();
 	if (!Path.IsEmpty())
 	{
-		WavFilePath = Path;
-		if (WavPathBox.IsValid()) WavPathBox->SetText(FText::FromString(WavFilePath));
+		SetCurrentWavPath(Path);
 		SetStatus(
 			FString::Printf(TEXT("Saved recording (%d samples @ %d Hz). Click Analyze."),
 				RecordedSamples.Num(), CapturedSampleRate),
@@ -1185,9 +1248,12 @@ FString SEmotionBridgePanel::WriteRecordingToWav()
 	FileData.Append(reinterpret_cast<const uint8*>(&H), sizeof(FWAVHeader));
 	FileData.Append(reinterpret_cast<const uint8*>(PCM.GetData()), DataBytes);
 
-	const FString TempPath = FPaths::Combine(
-		FPlatformProcess::UserTempDir(),
-		TEXT("EmotionBridge_Recording.wav"));
+	// Unique timestamped filename so back-to-back recordings don't overwrite
+	// each other AND import as distinct SoundWave assets (the importer keys
+	// off the WAV's basename, so a fixed name was being silently reused).
+	const FString Timestamp = FDateTime::Now().ToString(TEXT("%Y%m%d_%H%M%S"));
+	const FString FileName  = FString::Printf(TEXT("EmotionBridge_Recording_%s.wav"), *Timestamp);
+	const FString TempPath  = FPaths::Combine(FPlatformProcess::UserTempDir(), FileName);
 
 	if (!FFileHelper::SaveArrayToFile(FileData, *TempPath))
 	{
@@ -1254,12 +1320,6 @@ FSlateColor SEmotionBridgePanel::GetSlateColorForEmotion(const FString& Emotion)
 TSharedRef<SWidget> SEmotionBridgePanel::BuildSaveTakeSection()
 {
 	return SNew(SVerticalBox)
-		+ SVerticalBox::Slot().AutoHeight().Padding(0,0,0,4)
-		[
-			SNew(STextBlock)
-			.Text(LOCTEXT("SaveTakeHdr", "SAVE TAKE"))
-			.Font(FCoreStyle::GetDefaultFontStyle("Bold", 10))
-		]
 		+ SVerticalBox::Slot().AutoHeight().Padding(0,0,0,4)
 		[
 			SNew(STextBlock)
@@ -1380,13 +1440,13 @@ void SEmotionBridgePanel::OnLoadTakeRequested(const FEmotionTakeRecord& Take)
 	// Restore timeline.
 	CurrentTimeline = Take.Timeline;
 
-	// Restore the best available audio path.
+	// Restore the best available audio path.  bIsTakeLoad=true keeps the
+	// take's stored SoundWaveAssetPath (set further below) intact while
+	// still clearing the picked Face AnimSequence (different lip sync).
 	const FString BestAudio = Take.GetBestAudioPath();
 	if (!BestAudio.IsEmpty())
 	{
-		WavFilePath = BestAudio;
-		if (WavPathBox.IsValid())
-			WavPathBox->SetText(FText::FromString(WavFilePath));
+		SetCurrentWavPath(BestAudio, /*bIsTakeLoad=*/true);
 	}
 
 	// Restore analysis parameters into panel state.
@@ -1465,7 +1525,7 @@ void SEmotionBridgePanel::OnReanalyzeTakeRequested(const FEmotionTakeRecord& Tak
 	}
 
 	// Restore params from the take so the same settings are used.
-	WavFilePath      = BestAudio;
+	SetCurrentWavPath(BestAudio, /*bIsTakeLoad=*/true);
 	WindowSec        = Take.Params.WindowSec;
 	HopSec           = Take.Params.HopSec;
 	PadMode          = Take.Params.PadMode;
@@ -1513,12 +1573,7 @@ TSharedRef<SWidget> SEmotionBridgePanel::BuildMetaHumanSection()
 
 	return SNew(SVerticalBox)
 
-	// ── Header ──────────────────────────────────────────────────────────────
-	+ SVerticalBox::Slot().AutoHeight().Padding(0,0,0,4)
-	[
-		SNew(STextBlock).Text(LOCTEXT("MHHdr", "METAHUMAN FACE  (Phase 2B)"))
-			.Font(FCoreStyle::GetDefaultFontStyle("Bold", 10))
-	]
+	// ── Description ─────────────────────────────────────────────────────────
 	+ SVerticalBox::Slot().AutoHeight().Padding(0,0,0,6)
 	[
 		SNew(STextBlock)
@@ -1952,6 +2007,500 @@ void SEmotionBridgePanel::UpdateSoundWaveStatusUI()
 		MH_SoundWaveStatusText->SetText(FText::FromString(SoundWaveAssetPath));
 		MH_SoundWaveStatusText->SetColorAndOpacity(FSlateColor(FLinearColor::Green));
 	}
+}
+
+void SEmotionBridgePanel::SetCurrentWavPath(const FString& NewPath, bool bIsTakeLoad)
+{
+	const bool bChanged = (WavFilePath != NewPath);
+	WavFilePath = NewPath;
+	if (WavPathBox.IsValid())
+	{
+		WavPathBox->SetText(FText::FromString(WavFilePath));
+	}
+
+	if (!bChanged) return;
+
+	// Invalidate the picked Face AnimSequence — it was generated from the
+	// previous WAV's lip sync, so reusing it against new audio would replay
+	// the old phoneme curves.  Forcing the picker to clear makes the user
+	// re-run MetaHuman Performance + re-pick before the next bake.
+	BoundFaceAnimSequence.Reset();
+
+	// Take loads carry their own SoundWaveAssetPath; non-take changes (file
+	// picker, recording, text edit) leave us with a stale SoundWave so we
+	// clear it and let OnImportSoundWave re-import from the new WAV.
+	if (!bIsTakeLoad)
+	{
+		SoundWaveAssetPath.Reset();
+		UpdateSoundWaveStatusUI();
+	}
+
+	if (SeqBakeStatusText.IsValid())
+	{
+		SeqBakeStatusText->SetText(LOCTEXT("SeqAudioChanged",
+			"New audio loaded. Click Process & Bake when ready."));
+		SeqBakeStatusText->SetColorAndOpacity(FSlateColor(FLinearColor(1.f, 0.85f, 0.4f)));
+	}
+
+	UE_LOG(LogEmotionBridge, Log,
+		TEXT("Audio source changed to '%s' — cleared Face Anim picker%s."),
+		*WavFilePath,
+		bIsTakeLoad ? TEXT("") : TEXT(" + SoundWave reference"));
+}
+
+// ===========================================================================
+// Sequencer Bake — section builder
+// ===========================================================================
+
+TSharedRef<SWidget> SEmotionBridgePanel::BuildSequencerExportSection()
+{
+	return SNew(SVerticalBox)
+
+		+ SVerticalBox::Slot().AutoHeight().Padding(0,0,0,4)
+		[
+			SNew(STextBlock)
+				.AutoWrapText(true)
+				.ColorAndOpacity(FSlateColor::UseSubduedForeground())
+				.Text(LOCTEXT("SeqHelp",
+					"ONE-CLICK FLOW: Click Process & Bake. The panel will:\n"
+					"  1) Import the current WAV as a SoundWave (if not already).\n"
+					"  2) Run MetaHuman Performance to generate face animation from the audio (10-60s, blocking).\n"
+					"  3) Bake emotion control curves on top of the lip-sync curves.\n"
+					"  4) Update the bound Level Sequence's audio + face-animation tracks (auto-created on first run if no Level Sequence is picked).\n"
+					"  5) Open the Sequencer.  Hit Play.\n"
+					"OPTIONAL: pick a Level Sequence below to reuse a specific one across bakes."))
+		]
+
+		// Level Sequence picker
+		+ SVerticalBox::Slot().AutoHeight().Padding(0,4,0,2)
+		[
+			SNew(SHorizontalBox)
+			+ SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center).Padding(0,0,6,0)
+			[
+				SNew(STextBlock).Text(LOCTEXT("SeqLevelSeqLbl", "Level Sequence:"))
+			]
+			+ SHorizontalBox::Slot().FillWidth(1.0f)
+			[
+				SNew(SObjectPropertyEntryBox)
+					.AllowedClass(ULevelSequence::StaticClass())
+					.AllowClear(true)
+					.DisplayUseSelected(true)
+					.DisplayBrowse(true)
+					.ObjectPath_Lambda([this]()
+					{
+						return BoundLevelSequence.ToSoftObjectPath().ToString();
+					})
+					.OnObjectChanged_Lambda([this](const FAssetData& AD)
+					{
+						BoundLevelSequence = Cast<ULevelSequence>(AD.GetAsset());
+					})
+			]
+		]
+
+		// (Phase B: Face AnimSequence picker removed — Process & Bake auto-runs
+		// MetaHuman Performance and stashes the result in BoundFaceAnimSequence.)
+
+		// Action buttons: Process & Bake | Play | Open Sequencer
+		+ SVerticalBox::Slot().AutoHeight().Padding(0,8,0,2)
+		[
+			SNew(SHorizontalBox)
+			+ SHorizontalBox::Slot().FillWidth(1.0f).Padding(0,0,4,0)
+			[
+				SNew(SButton)
+					.HAlign(HAlign_Center)
+					.Text(LOCTEXT("SeqBakeBtn", "Process & Bake"))
+					.ToolTipText(LOCTEXT("SeqBakeTip",
+						"One click: import the WAV as a SoundWave (if needed), "
+						"run MetaHuman Performance to generate face animation, "
+						"bake emotion control curves on top, and replace the "
+						"audio + face animation tracks of the bound Level Sequence "
+						"(auto-created on first use)."))
+					.OnClicked(this, &SEmotionBridgePanel::OnBakeAndExport)
+			]
+			+ SHorizontalBox::Slot().FillWidth(1.0f).Padding(4,0,4,0)
+			[
+				SNew(SButton)
+					.HAlign(HAlign_Center)
+					.Text(LOCTEXT("SeqPlayBtn", "Play"))
+					.ToolTipText(LOCTEXT("SeqPlayTip",
+						"Play the bound Level Sequence in the editor world without opening the Sequencer panel."))
+					.OnClicked(this, &SEmotionBridgePanel::OnPlayBoundSequence)
+			]
+			+ SHorizontalBox::Slot().FillWidth(1.0f).Padding(4,0,0,0)
+			[
+				SNew(SButton)
+					.HAlign(HAlign_Center)
+					.Text(LOCTEXT("SeqOpenBtn", "Open Sequencer"))
+					.ToolTipText(LOCTEXT("SeqOpenTip",
+						"Open the bound Level Sequence in the Sequencer editor."))
+					.OnClicked(this, &SEmotionBridgePanel::OnOpenBoundSequence)
+			]
+		]
+
+		// Status line
+		+ SVerticalBox::Slot().AutoHeight().Padding(0,4,0,0)
+		[
+			SAssignNew(SeqBakeStatusText, STextBlock)
+				.AutoWrapText(true)
+				.ColorAndOpacity(FSlateColor::UseSubduedForeground())
+				.Text(LOCTEXT("SeqStatusInit",
+					"Click Process & Bake. SoundWave import, MetaHuman Performance, "
+					"and Level Sequence creation are all automatic."))
+		];
+}
+
+// ===========================================================================
+// Sequencer Bake — callbacks
+// ===========================================================================
+
+/**
+ * Locates the "Face" SkeletalMeshComponent on a MetaHuman actor.
+ * Mirrors FindFaceComponent in EmotionSequenceExporter.cpp — duplicated
+ * here as a local file-scope helper to avoid making the exporter helper
+ * public for one extra caller.
+ */
+static USkeletalMeshComponent* FindMetaHumanFaceComponent(AActor* Actor)
+{
+	if (!Actor) return nullptr;
+	USkeletalMeshComponent* Exact = nullptr;
+	USkeletalMeshComponent* Fallback = nullptr;
+	TArray<USkeletalMeshComponent*> SkelComps;
+	Actor->GetComponents<USkeletalMeshComponent>(SkelComps);
+	for (USkeletalMeshComponent* SK : SkelComps)
+	{
+		const FString N = SK->GetName();
+		if (N.Equals(TEXT("Face"), ESearchCase::IgnoreCase)) { Exact = SK; break; }
+		if (!Fallback && N.Contains(TEXT("Face"), ESearchCase::IgnoreCase)) { Fallback = SK; }
+	}
+	return Exact ? Exact : Fallback;
+}
+
+/**
+ * Auto-creates a Level Sequence at /Game/EmotionBridge/Generated/EmotionBridge_Sequence
+ * when the panel doesn't have one bound yet.  Returns the new (or existing) asset.
+ *
+ * Inlines the body of ULevelSequenceFactoryNew::FactoryCreateNew — that
+ * factory class lives in LevelSequenceEditor's Private/Factories folder
+ * which we can't include from outside the module.  All it does is:
+ *     ULevelSequence* New = NewObject<ULevelSequence>(Pkg, Name, Flags);
+ *     New->Initialize();
+ * + a small project-defaults frame range tweak we can skip safely
+ * (Initialize() picks sensible defaults).
+ */
+static ULevelSequence* CreateOrLoadDefaultLevelSequence()
+{
+	const FString PackagePath = TEXT("/Game/EmotionBridge/Generated");
+	const FString AssetName   = TEXT("EmotionBridge_Sequence");
+	const FString FullPath    = FString::Printf(TEXT("%s/%s.%s"), *PackagePath, *AssetName, *AssetName);
+
+	if (ULevelSequence* Existing = LoadObject<ULevelSequence>(nullptr, *FullPath))
+	{
+		return Existing;
+	}
+
+	const FString PackageName = FString::Printf(TEXT("%s/%s"), *PackagePath, *AssetName);
+	UPackage* Package = CreatePackage(*PackageName);
+	if (!Package)
+	{
+		UE_LOG(LogEmotionBridge, Error,
+			TEXT("CreateOrLoadDefaultLevelSequence: could not create package '%s'."),
+			*PackageName);
+		return nullptr;
+	}
+	Package->FullyLoad();
+
+	ULevelSequence* NewSeq = NewObject<ULevelSequence>(
+		Package, *AssetName,
+		RF_Public | RF_Standalone | RF_Transactional);
+	if (!NewSeq) return nullptr;
+
+	NewSeq->Initialize();
+
+	// Notify the asset registry + editor so it shows up in the Content Browser
+	// and the package can be saved.
+	FAssetRegistryModule::AssetCreated(NewSeq);
+	Package->MarkPackageDirty();
+
+	UE_LOG(LogEmotionBridge, Log,
+		TEXT("CreateOrLoadDefaultLevelSequence: created '%s'."), *NewSeq->GetPathName());
+	return NewSeq;
+}
+
+/**
+ * Generates a take-unique slug usable in asset paths/names.
+ * Pattern: <soundwave-base>_<HHMMSS>.  Stable across the same SoundWave +
+ * second so multiple bakes within one second share an output (idempotent
+ * for fast iteration), but different audio always lands in a fresh package.
+ */
+static FString MakeTakeId(const USoundWave* SoundWave)
+{
+	const FString Base = SoundWave ? SoundWave->GetName() : TEXT("Take");
+	const FString Stamp = FDateTime::Now().ToString(TEXT("%Y%m%d_%H%M%S"));
+	return FString::Printf(TEXT("%s_%s"), *Base, *Stamp);
+}
+
+FReply SEmotionBridgePanel::OnBakeAndExport()
+{
+	auto SetSeqStatus = [this](const FString& Msg, FLinearColor Color)
+	{
+		if (SeqBakeStatusText.IsValid())
+		{
+			SeqBakeStatusText->SetText(FText::FromString(Msg));
+			SeqBakeStatusText->SetColorAndOpacity(FSlateColor(Color));
+		}
+		SetStatus(Msg, Color);
+	};
+
+	// ── Validate inputs ──────────────────────────────────────────────────────
+	if (!CurrentTimeline.bIsValid || CurrentTimeline.Segments.IsEmpty())
+	{
+		SetSeqStatus(
+			TEXT("Process & Bake: no emotion timeline. Click Analyze (or load a take) first."),
+			FLinearColor::Red);
+		return FReply::Handled();
+	}
+
+	AActor* MetaHumanActor = BoundMetaHumanActor.Get();
+	if (!MetaHumanActor)
+	{
+		SetSeqStatus(
+			TEXT("Process & Bake: bind a MetaHuman actor first (METAHUMAN FACE section above)."),
+			FLinearColor::Red);
+		return FReply::Handled();
+	}
+
+	if (WavFilePath.IsEmpty())
+	{
+		SetSeqStatus(
+			TEXT("Process & Bake: select or record a WAV first."),
+			FLinearColor::Red);
+		return FReply::Handled();
+	}
+
+	// ── Auto-import SoundWave if needed ─────────────────────────────────────
+	if (SoundWaveAssetPath.IsEmpty())
+	{
+		FString ImportError;
+		const FString ImportedPath = FEmotionAudioAssetHelper::ImportWavAsSoundWave(
+			WavFilePath,
+			FEmotionAudioAssetHelper::GetDefaultAudioContentPath(),
+			ImportError);
+		if (ImportedPath.IsEmpty())
+		{
+			SetSeqStatus(
+				FString::Printf(TEXT("Process & Bake: SoundWave import failed: %s"), *ImportError),
+				FLinearColor::Red);
+			return FReply::Handled();
+		}
+		SoundWaveAssetPath = ImportedPath;
+		UpdateSoundWaveStatusUI();
+	}
+
+	USoundWave* SoundWave = LoadObject<USoundWave>(nullptr, *SoundWaveAssetPath);
+	if (!SoundWave)
+	{
+		SetSeqStatus(
+			FString::Printf(TEXT("Process & Bake: could not load SoundWave at '%s'."),
+				*SoundWaveAssetPath),
+			FLinearColor::Red);
+		return FReply::Handled();
+	}
+
+	// ── Resolve the MetaHuman face mesh ─────────────────────────────────────
+	USkeletalMeshComponent* FaceComp = FindMetaHumanFaceComponent(MetaHumanActor);
+	USkeletalMesh* FaceMesh = FaceComp ? FaceComp->GetSkeletalMeshAsset() : nullptr;
+	if (!FaceMesh)
+	{
+		SetSeqStatus(
+			FString::Printf(TEXT("Process & Bake: bound actor '%s' has no Face SkeletalMeshComponent / mesh."),
+				*MetaHumanActor->GetActorLabel()),
+			FLinearColor::Red);
+		return FReply::Handled();
+	}
+
+	// ── Auto-create Level Sequence if not bound ─────────────────────────────
+	ULevelSequence* LevelSeq = BoundLevelSequence.LoadSynchronous();
+	if (!LevelSeq)
+	{
+		LevelSeq = CreateOrLoadDefaultLevelSequence();
+		if (!LevelSeq)
+		{
+			SetSeqStatus(
+				TEXT("Process & Bake: could not auto-create Level Sequence at /Game/EmotionBridge/Generated."),
+				FLinearColor::Red);
+			return FReply::Handled();
+		}
+		BoundLevelSequence = LevelSeq;
+		UE_LOG(LogEmotionBridge, Log,
+			TEXT("Process & Bake: auto-created Level Sequence '%s'."),
+			*LevelSeq->GetPathName());
+	}
+
+	// ── Run MetaHuman Performance ───────────────────────────────────────────
+	SetSeqStatus(
+		TEXT("Process & Bake: running MetaHuman Performance (this can take 10-60s)..."),
+		FLinearColor(1.f, 0.85f, 0.f));
+
+	const FString TakeId = MakeTakeId(SoundWave);
+	const FString OutputPackage = FString::Printf(TEXT("/Game/EmotionBridge/Generated/%s"), *TakeId);
+	const FString OutputName    = FString::Printf(TEXT("Anim_FaceEmotion_%s"), *TakeId);
+
+	const FEmotionPerformanceRunResult PerfResult =
+		FEmotionPerformanceRunner::RunAudioToFace(
+			SoundWave, FaceMesh, OutputPackage, OutputName,
+			/*bGenerateBlinks=*/true, /*bDownmixChannels=*/true);
+
+	if (!PerfResult.AnimSequence)
+	{
+		SetSeqStatus(
+			FString::Printf(TEXT("Process & Bake: MetaHuman Performance failed — %s"),
+				*PerfResult.ErrorMessage),
+			FLinearColor::Red);
+		return FReply::Handled();
+	}
+
+	UAnimSequence* FaceAnim = PerfResult.AnimSequence;
+	BoundFaceAnimSequence = FaceAnim;   // stash for diagnostics / re-bakes
+
+	// ── Bake emotion curves on top of the lip-sync curves ───────────────────
+	const TArray<FEmotionExpressionPreset> Presets =
+		UMetaHumanEmotionDriverComponent::MakeDefaultPresets();
+
+	const bool bBakeOk = FEmotionAnimSequenceBaker::BakeEmotionCurves(
+		FaceAnim,
+		CurrentTimeline,
+		Presets,
+		BlendDuration,
+		bUseConfidenceAsWeight);
+	if (!bBakeOk)
+	{
+		SetSeqStatus(
+			FString::Printf(TEXT("Process & Bake: failed to bake emotion curves into '%s' — see log."),
+				*FaceAnim->GetName()),
+			FLinearColor::Red);
+		return FReply::Handled();
+	}
+
+	// ── Populate Level Sequence ─────────────────────────────────────────────
+	FString ExportError;
+	const bool bExportOk = FEmotionSequenceExporter::PopulateSequence(
+		LevelSeq, MetaHumanActor, SoundWave, FaceAnim, ExportError);
+	if (!bExportOk)
+	{
+		SetSeqStatus(
+			FString::Printf(TEXT("Process & Bake: %s"), *ExportError),
+			FLinearColor::Red);
+		return FReply::Handled();
+	}
+
+	// ── Open the sequence so the user can hit Play ──────────────────────────
+	if (GEditor)
+	{
+		if (UAssetEditorSubsystem* AES = GEditor->GetEditorSubsystem<UAssetEditorSubsystem>())
+		{
+			AES->OpenEditorForAsset(LevelSeq);
+		}
+	}
+
+	SetSeqStatus(
+		FString::Printf(TEXT("Process & Bake: done — '%s' / '%s' updated (%d segments). Sequencer opened — hit Play."),
+			*LevelSeq->GetName(), *FaceAnim->GetName(),
+			CurrentTimeline.Segments.Num()),
+		FLinearColor::Green);
+
+	return FReply::Handled();
+}
+
+FReply SEmotionBridgePanel::OnOpenBoundSequence()
+{
+	ULevelSequence* LevelSeq = BoundLevelSequence.LoadSynchronous();
+	if (!LevelSeq)
+	{
+		if (SeqBakeStatusText.IsValid())
+		{
+			SeqBakeStatusText->SetText(LOCTEXT("SeqOpenNoSeq", "No Level Sequence bound."));
+			SeqBakeStatusText->SetColorAndOpacity(FSlateColor(FLinearColor::Red));
+		}
+		return FReply::Handled();
+	}
+	if (GEditor)
+	{
+		if (UAssetEditorSubsystem* AES = GEditor->GetEditorSubsystem<UAssetEditorSubsystem>())
+		{
+			AES->OpenEditorForAsset(LevelSeq);
+		}
+	}
+	return FReply::Handled();
+}
+
+// M5 — Play the bound Level Sequence in the editor world without opening the
+// Sequencer panel. Spawns a transient ALevelSequenceActor whose ULevelSequencePlayer
+// advances on actor tick, which the editor drives every frame via the preview world.
+FReply SEmotionBridgePanel::OnPlayBoundSequence()
+{
+	auto SetSeqStatus = [this](const FString& Msg, FLinearColor Color)
+	{
+		if (SeqBakeStatusText.IsValid())
+		{
+			SeqBakeStatusText->SetText(FText::FromString(Msg));
+			SeqBakeStatusText->SetColorAndOpacity(FSlateColor(Color));
+		}
+		SetStatus(Msg, Color);
+	};
+
+	ULevelSequence* LevelSeq = BoundLevelSequence.LoadSynchronous();
+	if (!LevelSeq)
+	{
+		SetSeqStatus(TEXT("Play: pick a Level Sequence first."), FLinearColor::Red);
+		return FReply::Handled();
+	}
+
+	UWorld* World = GEditor ? GEditor->GetEditorWorldContext().World() : nullptr;
+	if (!World)
+	{
+		SetSeqStatus(TEXT("Play: no editor world available."), FLinearColor::Red);
+		return FReply::Handled();
+	}
+
+	// Stop any previous transient player so repeated clicks don't stack actors.
+	if (ActiveSequencePlayer.IsValid())
+	{
+		ActiveSequencePlayer->Stop();
+		ActiveSequencePlayer.Reset();
+	}
+	if (ActiveSequenceActor.IsValid())
+	{
+		if (ALevelSequenceActor* OldActor = ActiveSequenceActor.Get())
+		{
+			OldActor->Destroy();
+		}
+		ActiveSequenceActor.Reset();
+	}
+
+	FMovieSceneSequencePlaybackSettings PlaybackSettings;
+	PlaybackSettings.bAutoPlay = false;
+	PlaybackSettings.LoopCount.Value = 0;
+
+	ALevelSequenceActor* OutActor = nullptr;
+	ULevelSequencePlayer* Player = ULevelSequencePlayer::CreateLevelSequencePlayer(
+		World, LevelSeq, PlaybackSettings, OutActor);
+
+	if (!Player || !OutActor)
+	{
+		SetSeqStatus(TEXT("Play: failed to create Level Sequence player."), FLinearColor::Red);
+		return FReply::Handled();
+	}
+
+	ActiveSequencePlayer = Player;
+	ActiveSequenceActor  = OutActor;
+
+	Player->Play();
+
+	SetSeqStatus(
+		FString::Printf(TEXT("Play: '%s' playing in editor world."), *LevelSeq->GetName()),
+		FLinearColor::Green);
+
+	return FReply::Handled();
 }
 
 #undef LOCTEXT_NAMESPACE
