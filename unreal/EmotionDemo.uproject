@@ -14,7 +14,7 @@
 		}
 	],
 	"Plugins": [
-		{
+		{	
 			"Name": "EmotionBridge",
 			"Enabled": true
 		},
