@@ -39,6 +39,17 @@ unreal/.vsconfig
 unreal/EmotionDemo.sln
 unreal/Backup/
 unreal/UpgradeLog.htm
+unreal/Config/DefaultEditor.ini
+
+# MetaHuman vendor content — regenerate via MetaHuman Creator, never hand-edit
+unreal/Content/MetaHumans/
+
+# Large/test Unreal content assets (recordings, generated bakes, sandbox blueprints)
+unreal/Content/EmotionBridge/Audio/
+unreal/Content/EmotionBridge/Generated/
+unreal/Content/EmotionBridge/Sequences/
+unreal/Content/EmotionHuman.uasset
+unreal/Content/BP_EmotionFace.uasset
 
 # Claude Code
 .claude/
