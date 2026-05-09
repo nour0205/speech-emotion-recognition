@@ -18,6 +18,18 @@
 		{
 			"Name": "AudioCapture",
 			"Enabled": true
+		},
+		{
+			"Name": "ControlRig",
+			"Enabled": true
+		},
+		{
+			"Name": "RigVM",
+			"Enabled": true
+		},
+		{
+			"Name": "MetaHuman",
+			"Enabled": true
 		}
 	],
 	"Modules": [

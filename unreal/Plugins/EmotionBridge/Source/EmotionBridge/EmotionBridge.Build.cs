@@ -17,6 +17,8 @@ public class EmotionBridge : ModuleRules
 			"Json",
 			"JsonUtilities",
 			"DeveloperSettings",
+			"ControlRig",       // UControlRig + FAnimNode_ControlRig — MetaHuman face driving
+			"RigVM",            // required by ControlRig
 		});
 
 		PrivateDependencyModuleNames.AddRange(new string[]

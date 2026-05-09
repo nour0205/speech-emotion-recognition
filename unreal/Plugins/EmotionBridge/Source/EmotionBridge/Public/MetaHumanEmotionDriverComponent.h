@@ -9,6 +9,7 @@
 #include "MetaHumanEmotionDriverComponent.generated.h"
 
 class USkeletalMeshComponent;
+class UControlRig;
 
 /**
  * UMetaHumanEmotionDriverComponent
@@ -250,6 +251,25 @@ protected:
 	void RebuildMorphTargetSet();
 
 	/**
+	 * Walks the PostProcess AnimInstance's anim graph to find the FAnimNode_ControlRig
+	 * and returns its UControlRig instance.  For MetaHuman faces, that Control Rig is
+	 * typically Face_ControlBoard_CtrlRig and hosts the CTRL_<L|R>_<feature> controls
+	 * we drive each tick.  Cached across calls; returns nullptr if the rig isn't found.
+	 */
+	UControlRig* ResolveControlRig();
+
+	/**
+	 * Configures the resolved face mesh for editor-viewport animation:
+	 *   - VisibilityBasedAnimTickOption = AlwaysTickPoseAndRefreshBones
+	 *   - bUpdateAnimationInEditor = true (editor-only)
+	 *   - bUpdateClothInEditor    = true (editor-only)
+	 * Called each tick; no-ops once configured.  Does NOT swap the AnimInstance —
+	 * MetaHuman's original face AnimBP is preserved and we drive the face via
+	 * USkeletalMeshComponent::SetMorphTarget in ApplyBlendStateToMesh().
+	 */
+	void EnsureAnimInstance();
+
+	/**
 	 * Compute the final blended + scaled weight for a single morph target.
 	 * @param MorphTargetName  Name to look up in From and To presets.
 	 * @param FromPreset       Outgoing emotion preset (may be nullptr → treat as neutral).
@@ -268,6 +288,21 @@ private:
 	/** Resolved face SkeletalMeshComponent. Cached lazily; invalidated on actor changes. */
 	UPROPERTY(Transient)
 	TWeakObjectPtr<USkeletalMeshComponent> CachedFaceMesh;
+
+	/** Resolved ControlRig instance inside the face's PostProcess AnimInstance. */
+	TWeakObjectPtr<UControlRig> CachedControlRig;
+
+	/**
+	 * Cached UFunction* for Face_AnimBP::SetControl, plus the AnimInstance
+	 * class it was resolved against.  Re-resolves automatically if the
+	 * AnimInstance changes (e.g. on rebind).  Not a UPROPERTY — UFunction
+	 * lives on the UClass and is GC-rooted by it.
+	 */
+	UFunction* CachedSetControlFn = nullptr;
+	TWeakObjectPtr<UClass> CachedSetControlClass;
+
+	/** Last mesh on which we installed MetaHumanEmotionAnimInstance. */
+	TWeakObjectPtr<USkeletalMeshComponent> LastInstalledMesh;
 
 	/** Current blend state — transient, not persisted. */
 	FEmotionBlendState BlendState;
