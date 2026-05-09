@@ -122,7 +122,25 @@ void FEmotionApiClient::RequestTimeline(
 	Request->SetVerb(TEXT("POST"));
 	Request->SetHeader(TEXT("Content-Type"),
 		FString::Printf(TEXT("multipart/form-data; boundary=%s"), *Boundary));
-	Request->SetTimeout(180.f); // model download can take ~2 min on first run
+
+	// Derive timeout from actual audio duration so long files don't hit a fixed wall.
+	// Standard PCM WAV header: ByteRate at offset 28, data chunk size at offset 40.
+	// Allow 20× real-time for windowed inference, minimum 180 s for first-run model loads.
+	float TimeoutSec = 180.f;
+	if (FileBytes.Num() >= 44)
+	{
+		uint32 ByteRate = 0;
+		uint32 DataSize = 0;
+		FMemory::Memcpy(&ByteRate, FileBytes.GetData() + 28, sizeof(uint32));
+		FMemory::Memcpy(&DataSize, FileBytes.GetData() + 40, sizeof(uint32));
+		if (ByteRate > 0)
+		{
+			const float AudioDurationSec = static_cast<float>(DataSize) / static_cast<float>(ByteRate);
+			TimeoutSec = FMath::Max(180.f, AudioDurationSec * 20.f);
+		}
+	}
+	UE_LOG(LogEmotionBridge, Log, TEXT("POST /timeline/unreal timeout=%.0f s"), TimeoutSec);
+	Request->SetTimeout(TimeoutSec);
 	Request->SetContent(Body);
 
 	Request->OnProcessRequestComplete().BindLambda(

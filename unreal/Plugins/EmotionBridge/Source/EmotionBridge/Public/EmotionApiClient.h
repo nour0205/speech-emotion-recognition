@@ -16,7 +16,7 @@ DECLARE_DELEGATE_OneParam(FOnHealthCheckComplete, bool /*bIsHealthy*/);
  *
  * Endpoints used:
  *   GET  /health                — liveness check (5 s timeout)
- *   POST /timeline/unreal       — Unreal-specific timeline contract (180 s timeout)
+ *   POST /timeline/unreal       — Unreal-specific timeline contract (dynamic timeout: max(180 s, 20× audio duration))
  *
  * The /timeline/unreal endpoint returns a simplified JSON envelope:
  *   { "type": "timeline", "source": "ser_api", "version": "1.0",
